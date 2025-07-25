@@ -1,0 +1,18 @@
+# 忽略 Python 虚拟环境
+venv/
+.venv/
+
+# 忽略 Python 缓存文件
+__pycache__/
+
+db.sqlite3
+
+staticfiles/
+biget/__pycache__/
+xysz/__pycache__/
+xysz/core/__pycache__/
+xysz/env/__pycache__/
+xysz/management/__pycache__/
+xysz/management/commands/__pycache__/
+xysz/migrations/__pycache__/
+xysz/utils/__pycache__/

@@ -1,0 +1,49 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+      
+        {
+            "name": "Python Debugger: Django",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/manage.py",
+            "args": [
+                "runserver"
+            ],
+            "django": true
+        },
+        {
+      "name": "Python: Celery Worker",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "celery",
+      "args": [
+        "-A",
+        "biget",
+        "worker",
+        "--loglevel=debug",
+        "--pool=solo"  // 关键：使用 solo 池确保同步执行
+      ],
+      "django": true
+    },
+    {
+      "name": "Python: Attach to Process",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "localhost",
+        "port": 5678  // 默认调试端口
+      },
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",  // 项目本地路径
+          "remoteRoot": "."  // 远程/进程中的路径（通常相同）
+        }
+      ],
+      "justMyCode": false  // 可调试第三方库代码
+    }
+    ]
+}
