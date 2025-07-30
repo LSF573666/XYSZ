@@ -38,6 +38,7 @@ def send_trading_signal(
         time_frame: int, 
         plan_name: str, 
         side: str, 
+        selltype: str,
         price: float,
         time2: str,  # 格式如 "14:55"
         ws_url: str = "ws://8.216.32.13:8802"
@@ -62,6 +63,7 @@ def send_trading_signal(
         "plan": plan_name,
         "role": 101,  # 固定值
         "side": side,
+        "selltype": selltype,
         "price": price,
         "time2": time2
     }

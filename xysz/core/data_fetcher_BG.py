@@ -127,6 +127,7 @@ def query_klines(symbol, granularity, start_date, end_date=None, sort=True):
         missing_start = pd.to_datetime(start_date)
         missing_end = pd.to_datetime(end_date) if end_date else current_time
 
+
     if years_to_fetch:
         for year in years_to_fetch:
             fetch_start = pd.Timestamp(f'{year}-01-01')

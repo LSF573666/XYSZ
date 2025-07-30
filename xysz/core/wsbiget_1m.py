@@ -1,12 +1,18 @@
 # ws_client.py
 import json
+import os
+import shutil
 import ssl
 import threading
 import time
 import queue
+import pandas as pd
 import websocket
 from datetime import datetime, timezone, timedelta
 from concurrent.futures import ThreadPoolExecutor
+
+from xysz.config import LOCAL_DATA_DIR
+from xysz.main_biget import cof_main
 
 
 class BigetWebSocket:
@@ -20,6 +26,7 @@ class BigetWebSocket:
         self.lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.reconnect_delay = 5
+        self.redata_fetcher = True
 
     def on_open(self, ws):
         params = {
@@ -41,7 +48,17 @@ class BigetWebSocket:
 
     def on_message(self, ws, message):
         current_time = int(datetime.now(timezone.utc).timestamp())
-        if current_time % 60 <= 20:
+        minute_timestamp = (current_time // 60) * 60
+
+        if current_time % 900 <= 30 and self.redata_fetcher: 
+            shutil.rmtree(LOCAL_DATA_DIR)
+            os.makedirs(LOCAL_DATA_DIR, exist_ok=True)
+            cof_main()
+            self.redata_fetcher = False
+        elif current_time % 850 <= 30 :
+            self.redata_fetcher = True
+
+        if current_time % 60 <= 30:
             try:
                 msg = json.loads(message)
                 if 'arg' in msg and 'data' in msg:
@@ -51,28 +68,28 @@ class BigetWebSocket:
                     beijing_time = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone(timedelta(hours=8)))
                     minute_level_time = beijing_time.replace(second=0, microsecond=0)
                     formatted_timestamp = minute_level_time.strftime('%Y-%m-%d %H:%M:00%z')[:-2] + ":" + minute_level_time.strftime('%z')[-2:]
-                    
+
                     kline_data = {
                         'symbol': inst_id,
                         'timestamp': formatted_timestamp,
                         'open': float(kline[1]),
                         'high': float(kline[2]),
                         'low': float(kline[3]),
-                        'close': float(kline[1]),  # 修正为正确的close价格
+                        'close': float(kline[4]),  # 修正为正确的close价格
                         'volume': float(kline[5]),
                     }
-                    
-                    composite_key = f"{inst_id}|{formatted_timestamp}"
+
+                    composite_key = f"{inst_id}|{minute_timestamp}"
+                    # print(kline_data)
                     if composite_key not in self.processed_keys:
-                        # 直接调用Celery任务处理数据
                         from xysz.tasks import FB_strategy, KC_strategy
-                        FB_strategy.delay(kline_data)
+                        # FB_strategy.delay(kline_data)
                         KC_strategy.delay(kline_data)
+
                         self.processed_keys.add(composite_key)
-                        
                         if len(self.processed_keys) > 100:
                             self.processed_keys.clear()
-                        
+
             except Exception as e:
                 print(f"Error processing message: {e}")
 
@@ -161,11 +178,11 @@ class BigetWebSocket:
 
 def start_websocket_client():
     subscriptions = [
-        {"instId": "BTCUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
-        {"instId": "ETHUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
-        {"instId": "SOLUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
-        {"instId": "DOGEUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
-        {"instId": "XRPUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
+        {"instId": "BTCUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
+        {"instId": "ETHUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
+        {"instId": "SOLUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
+        {"instId": "DOGEUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
+        {"instId": "XRPUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
     ]
     
     ws = BigetWebSocket(subscriptions)

@@ -143,6 +143,7 @@ def execute_sell_action(result, symbol,buy_date, close, grid=None):
         time_interval = 900
         timetype = "15分钟"
         reminder = "KC"
+        selltype = "TP"
 
     # print(f"本地卖出信号触发：日期={buy_date}, 卖出价格={close}") 
     dt = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S%z")
@@ -165,17 +166,18 @@ def execute_sell_action(result, symbol,buy_date, close, grid=None):
                 time_frame=time_interval,
                 plan_name=reminder,
                 side=sell_side,
+                selltype=selltype,
                 price=formatted_price,
                 time2=formatted_time
             )
-        send_stock_alert(symbol, time_interval, reminder, f"{sell_side1} {formatted_time},{formatted_price}")
+        # send_stock_alert(symbol, time_interval, reminder, f"{sell_side1} {formatted_time},{formatted_price}")
         if order_request:
             has_traded_in_block = True  # 标记已交易
     except Exception as e:
         print(f"okx平仓失败: {e}")
 
 
-def calculate_kc_channel(df, ema_period=20, atr_period=20, multiplier=2):
+def calculate_kc_channel(df, ema_period=16, atr_period=16, multiplier=2):
     df['ema'] = df['close'].ewm(span=ema_period, adjust=False).mean()
     df['atr'] = talib.ATR(
         high=df['high'], 
@@ -189,9 +191,17 @@ def calculate_kc_channel(df, ema_period=20, atr_period=20, multiplier=2):
     return df['kc_upper'], df['kc_lower'], df['ema']
 
 
-def calculate_adx(df, period=14):
+def calculate_adx(df, period=12):
     df['adx'] = talib.ADX(df['high'], df['low'], df['close'], timeperiod=period)
     return df['adx']
+
+def calculate_rsi_with_talib(prices, period=10):
+
+    # 使用TA-Lib计算RSI
+    rsi = talib.RSI(prices['close'].values, timeperiod=period)
+    
+    return rsi
+
 
 """斐波那契回撤+正态分布"""
 def identify_support_resistance(data, n=450, variance_threshold=0.85):
@@ -280,61 +290,88 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
         if grid_value == 3:
             strategy = 'KC'
             plan = 'KC'
+            atr_period = 14
+            result = 3
+            kc_upper,kc_lower,Medium_track = calculate_kc_channel(slow_his_data)
+            adx_value = calculate_adx(slow_his_data)
+            rsi_value = calculate_rsi_with_talib(slow_his_data)
+            adx_value = adx_value.iloc[-1]
+            rsi_value = rsi_value[-1]
+            # print(rsi_value)
+            kc_upper = kc_upper.iloc[-1]
+            kc_lower = kc_lower.iloc[-1]
+            Medium_track = Medium_track.iloc[-1]
+            last_row = slow_his_data.iloc[-1]
+            current_timestamp = last_row['timestamp']
+            close1 = last_row['close']
+            prev_row = slow_his_data.iloc[-2]
+            close2 = prev_row['close']
+            if adx_value >= 30 and rsi_value > 50:
+                mode = 2
+                if close2 < Medium_track and close1 > Medium_track:
+                    tide = 1
+                elif close2 < Medium_track and close1 > Medium_track:
+                    tide = 2
+            else:
+                mode = 1
+            # print(mode)
+
         else :
             strategy = 'grid_fly'
             plan = 'grid_fly'
+            atr_period = 8
 
-        for i in range(200, 50-1, -1):
-            if len(slow_his_data) < i:
-                continue
+            for i in range(200, 50-1, -1):
+                if len(slow_his_data) < i:
+                    continue
 
-            slow_his_data = slow_his_data.dropna(subset=['close'])  # 删除 NaN
-            slow_his_data['close'] = slow_his_data['close'].astype(float)  # 强制转换
-            closes = slow_his_data['close'].iloc[-i:].values
+                slow_his_data = slow_his_data.dropna(subset=['close'])  # 删除 NaN
+                slow_his_data['close'] = slow_his_data['close'].astype(float)  # 强制转换
+                closes = slow_his_data['close'].iloc[-i:].values
 
-            min_close = np.min(closes)
-            max_close = np.max(closes)
-            fluctuation_pct = (max_close - min_close) / min_close * 100
-            is_consolidation = fluctuation_pct < grid_pct
-            if fluctuation_pct > 1.5 :
-                stop_five_transaction = True
-            # 初始化结果
+                min_close = np.min(closes)
+                max_close = np.max(closes)
+                fluctuation_pct = (max_close - min_close) / min_close * 100
+                is_consolidation = fluctuation_pct < grid_pct
+                if fluctuation_pct > 1.5 :
+                    stop_five_transaction = True
+                # 初始化结果
 
-            result = {
-                'is_consolidation': is_consolidation,
-                'current_price': slow_his_data.iloc[-1]['close'],
-                'fluctuation_pct': fluctuation_pct,
-                'signal': 'hold',
-                'lower_bound': None,
-                'upper_bound': None
-            }
-            # print(result)
-        
-            if is_consolidation:
-                print(f"{strategy}_{symbol}现在为震荡区")
-                if middle_current_time is None:
-                    middle_current_time = slow_his_data.iloc[-451]['timestamp']
-                lower_bound, upper_bound = normal_distribution(slow_his_data)
-                middle_close1 = slow_his_data.iloc[-1]['close']
-                middle_close2 = slow_his_data.iloc[-2]['close']
-                result.update({
-                    'lower_bound': lower_bound,
-                    'upper_bound': upper_bound
-                })
-                # print(middle_close2,lower_bound,upper_bound)
-                # print(type(middle_close2),type(lower_bound))
+                result = {
+                    'is_consolidation': is_consolidation,
+                    'current_price': slow_his_data.iloc[-1]['close'],
+                    'fluctuation_pct': fluctuation_pct,
+                    'signal': 'hold',
+                    'lower_bound': None,
+                    'upper_bound': None
+                }
+                # print(result)
 
-                if middle_close1 > lower_bound and middle_close2 <= lower_bound:
-                    tide = 1
-                    result['signal'] = '1'
-                elif middle_close1 < upper_bound and middle_close2 >= upper_bound:
-                    tide = 2
-                    result['signal'] = '2'
-                if lower_bound is not None:
-                    mode = 1
-                break
-            else:
-                mode = 2
+                if is_consolidation:
+                    print(f"{strategy}_{symbol}现在为震荡区")
+                    if middle_current_time is None:
+                        middle_current_time = slow_his_data.iloc[-451]['timestamp']
+                    lower_bound, upper_bound = normal_distribution(slow_his_data)
+                    middle_close1 = slow_his_data.iloc[-1]['close']
+                    middle_close2 = slow_his_data.iloc[-2]['close']
+                    result.update({
+                        'lower_bound': lower_bound,
+                        'upper_bound': upper_bound
+                    })
+                    # print(middle_close2,lower_bound,upper_bound)
+                    # print(type(middle_close2),type(lower_bound))
+
+                    if middle_close1 > lower_bound and middle_close2 <= lower_bound:
+                        tide = 1
+                        result['signal'] = '1'
+                    elif middle_close1 < upper_bound and middle_close2 >= upper_bound:
+                        tide = 2
+                        result['signal'] = '2'
+                    if lower_bound is not None:
+                        mode = 1
+                    break
+                else:
+                    mode = 2
 
         if tide is None or tide == 0:
             if grid_value==3 :
@@ -349,10 +386,9 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
             else:
                 tide = 2
 
-        atr_period = 5
         slow_his_data = calculate_atr(slow_his_data, atr_period=atr_period)
         five_atr = slow_his_data['atr'].iloc[-1]
-        atr_slope = slow_his_data['atr_slope'].iloc[-1]
+        # atr_slope = slow_his_data['atr_slope'].iloc[-1]
         if five_atr > 200 :
             dpo = 0.3
         else:
@@ -372,9 +408,9 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                 dpo=dpo
             )
             if set_result:
-                cache.set(base_key, f"{plan}_{tide}_{mode}_{dpo}", timeout=216000)  # 无 timeout
+                cache.set(base_key, f"{plan}_{tide}_{mode}_{dpo}", timeout=216000)
                 print(f"震荡趋势信号:{full_key}")
-                return result,tide,mode,atr_slope
+                return result,adx_value
 
         elif cached_value != f"{plan}_{tide}_{mode}_{dpo}":
             # 参数变化，发送信号并更新缓存（无超时）
@@ -386,152 +422,14 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                 dpo=dpo
             )
             if set_result:
-                cache.set(base_key, f"{plan}_{tide}_{mode}_{dpo}", timeout=216000)  # 无 timeout
+                cache.set(base_key, f"{plan}_{tide}_{mode}_{dpo}", timeout=216000)
                 print(f"震荡趋势已更新:{full_key}")
-                return result,tide,mode,atr_slope
+                return result,adx_value
         else:
             # 参数未变化，不发送信号
             print(f"震荡趋势未变化:{full_key}")
-            return result,0,0,atr_slope
+            return result,0
 
     except Exception as e:
         print(f"报错: {e}")
 
-
-# """
-# 买入主逻辑
-# """
-# def set_signals(middle_his_data, slow_his_data):
-#     global result
-#     try:
-#         slow_prices = pd.DataFrame(slow_his_data)  # 包含high, low, close列
-#         supports, resistances, median_line, (dense_low, dense_high), atr_slope = identify_support_resistance(slow_prices)
-#         slow_data = slow_his_data
-#         middle_data = middle_his_data
-#         last_row = slow_data.iloc[-1]
-#         current_timestamp = last_row['timestamp']
-#         close1 = last_row['close']
-#         prev_row = slow_data.iloc[-2]
-#         close2 = prev_row['close']
-#         supports_1 = supports[0] if len(supports) > 0 else None
-#         supports_2 = supports[1] if len(supports) > 1 else None
-#         supports_3 = supports[2] if len(supports) > 1 else None
-#         resistances_5 = resistances[0] if len(resistances) > 0 else None
-#         resistances_4 = resistances[1] if len(resistances) > 1 else None
-#         resistances_3 = resistances[2] if len(resistances) > 1 else None
-#         buy_date = current_timestamp
-#         current_time = datetime.strptime(current_timestamp, "%Y-%m-%d %H:%M:%S%z")
-#         if buy_close_price is not None or buy_close_price != 0:
-#             longprice_gap = close1 - buy_close_price
-#             shortprice_gap = buy_close_price - close1
-#         else :
-#             longprice_gap = 0
-#             shortprice_gap = 0
-#         current_minute = current_time.minute
-#         current_hour = current_time.hour
-#         total_minutes = current_hour * 60 + current_minute
-#         fifteen_minute = ((total_minutes - 1) // 15) * 15
-#         five_minute = ((total_minutes - 1) // 5) * 5  
-#         if fifteen_minute is None:
-#             fifteen_minute = fifteen_minute - 20
-#         if fifteen_minute != fifteen_minute:
-#             has_traded_in_block = False  # 重置交易标志
-#             long_line_price = supports_2 if supports_2 > dense_low else dense_low
-#             if close2 < long_line_price and close1 > long_line_price and atr_slope > 0.005:
-#                 error_signal -= 1
-#                 if error_signal <= 0:
-#                     result = 1 
-#                     if position_size <= 0:
-#                         execute_buy_action(buy_date, fifteen_minute, grid=0)
-#                     if position_size > 0 and position_side == 'short':
-#                         execute_sell_action(buy_date, fifteen_minute, grid=0)
-#                         if shortprice_gap > 500:
-#                             error_signal = 2
-#                             print(f"当前价格与买入价格价差: {shortprice_gap}，此次标记错误信号，不交易")
-#                         else: 
-#                             execute_buy_action(buy_date, fifteen_minute, grid=0)
-#                 else:
-#                     has_traded_in_block = True 
-#                     fifteen_minute = fifteen_minute
-#             short_line_price = resistances_4 if resistances_4 < dense_high else dense_high
-#             if close2 > short_line_price and close1 < short_line_price and atr_slope > 0.01:
-#                 error_signal -= 1
-#                 if error_signal <= 0:
-#                     result = 2 
-#                     if position_size <= 0:
-#                         execute_buy_action(buy_date, fifteen_minute, grid=0)
-#                     if position_size > 0 and position_side == 'long':
-#                         execute_sell_action(buy_date, fifteen_minute, grid=0)
-#                         if longprice_gap > 500:
-#                             error_signal = 2
-#                             print(f"当前价格与买入价格价差: {longprice_gap}，此次标记错误信号，不交易")
-#                         else:
-#                             execute_buy_action(buy_date, fifteen_minute, grid=0)
-#                 else:
-#                     has_traded_in_block = True 
-#                     fifteen_minute = fifteen_minute
-#             short_supports = supports_2 if supports_2 < dense_low else dense_low
-#             long_resistances = resistances_4 if resistances_4 > dense_high else dense_high
-#             short_supports_price = short_supports * 0.985 if short_supports * 0.985 > supports_1 else supports_1 * 0.9995
-#             long_resistances_price = long_resistances * 1.015 if long_resistances * 1.015 < resistances_5 else resistances_5 * 1.0005
-#             print(f"大级别支撑位: {supports_1:.3f},{supports_2:.3f}  中位值: {median_line:.3f},  压力位: {resistances_4:.3f},{resistances_5:.3f},空头: {short_supports_price:.3f}, 多头: {long_resistances_price:.3f},artr_slope: {atr_slope:.3f}")
-#             if ((position_size > 0 and position_side == 'long') or position_size <= 0) :
-#                 if close2 > short_supports_price and close1 < short_supports_price and atr_slope > 0.005:
-#                     result = 2 
-#                     execute_sell_action(buy_date, fifteen_minute, grid=0)
-#                     error_signal -= 1
-#                     if error_signal <= 0:
-#                         if shortprice_gap > 500:
-#                                 error_signal = 2
-#                                 print(f"当前价格与买入价格价差: {shortprice_gap}，此次标记错误信号，不交易")
-#                         else: 
-#                             execute_buy_action(buy_date, fifteen_minute, grid=0)
-#                             print(f"压力位: {short_supports_price:.3f}")
-#                     else:
-#                         has_traded_in_block = True
-#                         fifteen_minute = fifteen_minute
-#             if ((position_size > 0 and position_side == 'short') or position_size <= 0) :
-#                 if close2 < long_resistances_price and close1 > long_resistances_price and atr_slope > 0.005:
-#                     result = 1
-#                     execute_sell_action(buy_date, fifteen_minute, grid=0)
-#                     if error_signal <= 0:
-#                         if shortprice_gap > 500:
-#                                 error_signal = 2
-#                                 print(f"当前价格与买入价格价差: {shortprice_gap}，此次标记错误信号，不交易")
-#                         else: 
-#                             execute_buy_action(buy_date, fifteen_minute, grid=0)
-#                             print(f"支撑位: {long_resistances_price:.3f}")
-#                     else:
-#                         has_traded_in_block = True
-#                         fifteen_minute = fifteen_minute
-#         if five_minute is None:
-#             five_minute = five_minute - 10
-#         if five_minute != five_minute:
-#             has_traded_in_block = False 
-#             strategy_result = define_grid_strategy(middle_his_data, slow_his_data)
-#             if strategy_result['signal'] == '1' and ((position_size > 0 and position_side == 'short') or position_size <= 0):
-#                 result = 1 
-#                 if position_size > 0:
-#                     execute_sell_action(buy_date, five_minute, grid=result)
-#                 execute_buy_action(buy_date, five_minute, grid=result)
-#             elif strategy_result['signal'] == '2' and ((position_size > 0 and position_side == 'long') or position_size <= 0):
-#                 result = 2
-#                 if position_size > 0:
-#                     execute_sell_action(buy_date, five_minute, grid=result)
-#                 execute_buy_action(buy_date, five_minute, grid=result)
-#             result = 1
-#             # execute_sell_action(buy_date, fifteen_minute, grid=result)
-#             # execute_buy_action(buy_date, fifteen_minute, grid=result)
-#             if strategy_result['lower_bound'] and strategy_result['upper_bound'] is not None :
-#                 if (close1 < strategy_result['lower_bound'] * 0.9982) or (close1 > strategy_result['upper_bound'] *1.0022):
-#                     result = 1 if strategy_result['signal'] == '1'else 2
-#                     if position_size > 0:
-#                         execute_sell_action(buy_date, five_minute, grid=result)
-#                     execute_buy_action(buy_date, five_minute, grid=result)
-#                     stop_five_transaction = False
-#         print(f"{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f}, 大区间:{dense_low:.3f} - {dense_high:.3f},小区间:{strategy_result['lower_bound']} - {strategy_result['upper_bound']}")
-#         return 1
-    
-#     except Exception as e:
-#         print(f"报错: {e}")
-#         return HttpResponse(f"报错: {e}")

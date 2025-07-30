@@ -1,19 +1,12 @@
 from django.http import HttpResponse
 import pandas as pd
 from datetime import datetime, timedelta
-import redis
-import json
-from typing import Tuple, Dict
-# import talib
 from xysz.core import data_fetcher_BG
-# from xysz.core.wsbiget_1m import start_multiple_subscriptions
 from xysz.utils.Utils import Utils
-# from xysz.core.wsxysz_1m import start_ws_1m
-# from xysz.env.BacktestEnv import BacktestEnv
 
 pairs = {'BTC', 'ETH', 'SOL', 'DOGE', 'XRP'}
 granularity_fast = '1m'
-granularity_middle = '1m'
+granularity_middle = '5m'
 granularity_slow = '15m'
 granularity_slow_1 = '1H'
 instType = "USDT-FUTURES"
@@ -45,44 +38,46 @@ def safe_convert_to_datetime(ts):
 
 def cof_main():
 
-    fast_start_date = (datetime.now() - timedelta(days=2)).strftime('%Y-%m-%d')
+    fast_start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     fast_end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
     middle_start_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     middle_end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
-    slow_start_date = (datetime.now() - timedelta(days=10)).strftime('%Y-%m-%d')
+    slow_start_date = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
     slow_end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
     slow_1_start_date = (datetime.now() - timedelta(days=83)).strftime('%Y-%m-%d')
     slow_1_end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
 
+    all_fast_data = {}
     all_middle_data = {}
-    all_slow_data = {}
+    # all_slow_data = {}
     
     for pair in pairs:
         symbol = f"{pair}USDT"
         # 获取历史数据
-        # fast_his_data = data_fetcher_BG.query_klines(symbol, granularity_fast, fast_start_date, fast_end_date)
+        fast_his_data = data_fetcher_BG.query_klines(symbol, granularity_fast, fast_start_date, fast_end_date)
     
         middle_his_data = data_fetcher_BG.query_klines(symbol, granularity_middle, middle_start_date, middle_end_date)
     
-        slow_his_data = data_fetcher_BG.query_klines(symbol, granularity_slow, slow_start_date, slow_end_date)
+        # slow_his_data = data_fetcher_BG.query_klines(symbol, granularity_slow, slow_start_date, slow_end_date)
         # granularity_slow_1 = data_fetcher_BG.query_klines(symbol, granularity_slow_1, slow_1_start_date, slow_1_end_date)
         
         # 转换数据类型
-        # fast_his_data = Utils.str_to_numeric(fast_his_data)
+        fast_his_data = Utils.str_to_numeric(fast_his_data)
         middle_his_data = Utils.str_to_numeric(middle_his_data)
-        slow_his_data = Utils.str_to_numeric(slow_his_data)
+        # slow_his_data = Utils.str_to_numeric(slow_his_data)
         # granularity_slow_1 = Utils.str_to_numeric(granularity_slow_1)
         
         # 添加日期列
-        # fast_his_data['date'] = pd.to_datetime(fast_his_data['timestamp'])
+        fast_his_data['date'] = pd.to_datetime(fast_his_data['timestamp'])
         middle_his_data['date'] = pd.to_datetime(middle_his_data['timestamp'])
-        slow_his_data['date'] = pd.to_datetime(slow_his_data['timestamp'])
+        # slow_his_data['date'] = pd.to_datetime(slow_his_data['timestamp'])
         # granularity_slow_1['date'] = pd.to_datetime(granularity_slow_1['timestamp'])
         # 保存到字典中
+        all_fast_data[pair] = fast_his_data
         all_middle_data[pair] = middle_his_data
-        all_slow_data[pair] = slow_his_data
+        # all_slow_data[pair] = slow_his_data
     
-    return all_middle_data,all_slow_data
+    return all_fast_data,all_middle_data
 
 
 def data_delet_middle(middle_his_data,all_middle_data,symbol):
@@ -99,20 +94,16 @@ def data_delet_middle(middle_his_data,all_middle_data,symbol):
     middle_data['timestamp'] = pd.to_datetime(middle_data['timestamp'], errors='coerce', utc=True)
     middle_data['timestamp'] = middle_data['timestamp'].dt.tz_convert('Asia/Shanghai')
 
-    # 检查后三行是否有重复时间戳
-    middle_last_three = middle_data.tail(3)
-    duplicate_mask = middle_last_three.duplicated(subset=['timestamp'], keep=False)
-    middle_duplicates_to_remove = middle_last_three[duplicate_mask]
-
-    # 原有时间间隔检查
-    middle_last_three['timestamp_ms'] = middle_last_three['timestamp'].astype(int) // 10**6
-    middle_interval_to_remove = middle_last_three[middle_last_three['timestamp_ms'] % 300000 != 0]
-
-    # 合并需要删除的索引（重复 + 不符合间隔）
-    middle_to_remove = pd.concat([middle_duplicates_to_remove, middle_interval_to_remove]).index.unique()
-    all_middle_data[symbol] = middle_data.drop(middle_to_remove)
-
+    # 检查后三行是否有重复时间戳，并保留每组重复时间戳的最后一行
+    middle_data = middle_data.drop_duplicates(subset=['timestamp'], keep='last')
     
+    # 原有时间间隔检查（保持不变）
+    middle_last_three = middle_data.tail(3)
+    middle_last_three['timestamp_ms'] = middle_last_three['timestamp'].astype(int) // 10**6
+    slow_interval_to_remove = middle_last_three[middle_last_three['timestamp_ms'] % 900000 != 0]
+    
+    # 删除不符合时间间隔的行（如果有）
+    all_middle_data[symbol] = middle_data.drop(slow_interval_to_remove.index)
 
     
     # print("\nall_middle_data:")
@@ -126,32 +117,32 @@ def data_delet_slow(slow_his_data,all_slow_data,symbol):
 
     # 打印最后一个时间戳的dtype
     # print("\n最后一个时间戳的dtype:")
+    # print("\n准备删除:")
     # print(type(middle_his_data['timestamp'].iloc[-1]))
-    # print(all_middle_data[symbol].tail(2))
+    # print(slow_his_data.tail(3))
     slow_data = slow_his_data
 
     # 处理 slow 数据
     slow_data['timestamp'] = pd.to_datetime(slow_data['timestamp'], errors='coerce', utc=True)
     slow_data['timestamp'] = slow_data['timestamp'].dt.tz_convert('Asia/Shanghai')
     
-    # 检查后三行是否有重复时间戳
-    slow_last_three = slow_data.tail(3)
-    duplicate_mask = slow_last_three.duplicated(subset=['timestamp'], keep=False)
-    slow_duplicates_to_remove = slow_last_three[duplicate_mask]
+    # 检查后三行是否有重复时间戳，并保留每组重复时间戳的最后一行
+    slow_data = slow_data.drop_duplicates(subset=['timestamp'], keep='last')
     
-    # 原有时间间隔检查
+    # 原有时间间隔检查（保持不变）
+    slow_last_three = slow_data.tail(3)
     slow_last_three['timestamp_ms'] = slow_last_three['timestamp'].astype(int) // 10**6
     slow_interval_to_remove = slow_last_three[slow_last_three['timestamp_ms'] % 900000 != 0]
     
-    # 合并需要删除的索引（重复 + 不符合间隔）
-    slow_to_remove = pd.concat([slow_duplicates_to_remove, slow_interval_to_remove]).index.unique()
-    all_slow_data[symbol] = slow_data.drop(slow_to_remove)
+    # 删除不符合时间间隔的行（如果有）
+    all_slow_data[symbol] = slow_data.drop(slow_interval_to_remove.index)
 
-    # print(f"{symbol} 数据删除成功")
+    print(f"{symbol} 数据删除成功")
     # print("\nall_middle_data:")
     # print(all_middle_data[symbol].tail(2))
-    # print("\nall_slow_data:")
-    # print(all_slow_data[symbol].tail(2))
+    print("\nall_slow_data:")
+    print(all_slow_data[symbol].tail(3).to_string())
+
     return all_slow_data
 
 

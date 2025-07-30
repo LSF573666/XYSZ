@@ -7,7 +7,7 @@ from datetime import datetime
 from django.core.cache import cache
 
 from xysz.config import get_api_balance
-from xysz.env.BacktestEnv import calculate_adx, calculate_kc_channel, calculate_rsi_with_talib, define_grid_strategy, execute_buy_action, execute_sell_action
+from xysz.env.BacktestEnv import calculate_adx, calculate_kc_channel, define_grid_strategy, execute_buy_action, execute_sell_action
 from xysz.env.MockAccount import MockAccount
 from xysz.main_biget import cof_main, data_delet_middle, data_delet_slow
 from xysz.tests import send_mode_signal
@@ -30,7 +30,7 @@ def FB_strategy(self, ws_data):
     
     try:
         # time.sleep(10)
-        all_fast_data,all_middle_data = cof_main()
+        all_fast_data,all_slow_data = cof_main()
 
         ws_type = ws_data['symbol'].replace("USDT", "")
         # print(ws_type)
@@ -115,7 +115,7 @@ def FB_strategy(self, ws_data):
             # fifteen_key = f"FB_{symbol}_{fifteen_now}"
             FB_key = 2 
 
-            strategy_result,adx_value = define_grid_strategy(symbol, fast_his_data, FB_key)
+            strategy_result,tide,mode,atr_slope = define_grid_strategy(symbol, fast_his_data, FB_key)
             # adx_value = calculate_adx(fast_his_data)
             # adx_value = adx_value.iloc[-1]
 
@@ -161,16 +161,16 @@ def FB_strategy(self, ws_data):
 
 @shared_task(bind=True)
 def KC_strategy(self, ws_data):
-    global has_traded_in_block,error_signal
+    global has_traded_in_block,error_signal, strategy_result
     five_minute = None
     try:
         # time.sleep(10)
-        all_fast_data, all_middle_data = cof_main()
+        all_fast_data,all_slow_data = cof_main()
 
         ws_type = ws_data['symbol'].replace("USDT", "")
         # print(ws_type)
         symbol = ws_type
-        slow_keys = list(all_fast_data.keys())
+        slow_keys = list(all_slow_data.keys())
         # print(slow_keys)
         cache_key = f"kline_{ws_type}_{ws_data['timestamp'].replace(' ', '_').replace(':', '-')}"
         if cache.get(cache_key):
@@ -179,8 +179,8 @@ def KC_strategy(self, ws_data):
 
         if ws_type in slow_keys:
             # 初始化历史数据
-            middle_his_data = all_middle_data[symbol]
-            # fast_his_data = all_middle_data[symbol]
+            # middle_his_data = all_middle_data[symbol]
+            slow_his_data = all_slow_data[symbol]
             # print("当前 slow_his_data 末尾数据：")
             # print(slow_his_data.tail(2))
 
@@ -192,8 +192,8 @@ def KC_strategy(self, ws_data):
             # print(kline_data)
 
             # 确保 slow_his_data 是 DataFrame
-            middle_his_data = pd.DataFrame(
-                middle_his_data,
+            slow_his_data = pd.DataFrame(
+                slow_his_data,
                 columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'Denominated_Coin_Volume', 'whatever']
             )
             # print(kline_data)
@@ -204,130 +204,122 @@ def KC_strategy(self, ws_data):
 
             # 提取交集列
             # middle_cols = kline_data[middle_his_data.columns.intersection(kline_data.columns)]
-            middle_cols = kline_data[middle_his_data.columns.intersection(kline_data.columns)]
+            slow_cols = kline_data[slow_his_data.columns.intersection(kline_data.columns)]
 
             # 设置新索引（假设索引是时间戳）
             # middle_cols.index = [middle_his_data.index[-1] + 1]
-            middle_cols.index = [middle_his_data.index[-1] + 1]
+            slow_cols.index = [slow_his_data.index[-1] + 1]
 
             # 合并数据
             # middle_his_data = pd.concat([middle_his_data, middle_cols], ignore_index=False)
-            middle_his_data = pd.concat([middle_his_data, middle_cols], ignore_index=False)
-        #     # print(slow_his_data.tail(3))
-        #     # print(f"数据合并成功")
-        #     data_delet_slow(slow_his_data,all_slow_data,symbol)
+            slow_his_data = pd.concat([slow_his_data, slow_cols], ignore_index=False)
+            # print(slow_his_data.tail(3))
+            # print(f"数据合并成功")
+            data_delet_slow(slow_his_data,all_slow_data,symbol)
             # print(f"KC数据合并成功")
 
-            kc_grid = 3
-            strategy_result,adx_value = define_grid_strategy(symbol, middle_his_data, kc_grid)
-
-            # kc_upper,kc_lower,Medium_track = calculate_kc_channel(middle_his_data)
-            # adx_value = calculate_adx(middle_his_data)
-            # rsi_value = calculate_rsi_with_talib(middle_his_data)
-            # adx_value = adx_value[-1]
-            # # print(adx_value)
-            # kc_upper = kc_upper.iloc[-1]
-            # kc_lower = kc_lower.iloc[-1]
-            # Medium_track = Medium_track.iloc[-1]
-            last_row = middle_his_data.iloc[-1]
+            kc_upper,kc_lower,Medium_track = calculate_kc_channel(slow_his_data)
+            adx_value = calculate_adx(slow_his_data)
+            adx_value = adx_value.iloc[-1]
+            # print(adx_value)
+            kc_upper = kc_upper.iloc[-1]
+            kc_lower = kc_lower.iloc[-1]
+            Medium_track = Medium_track.iloc[-1]
+            last_row = slow_his_data.iloc[-1]
             current_timestamp = last_row['timestamp']
             close1 = last_row['close']
-            # prev_row = middle_his_data.iloc[-2]
-            # close2 = prev_row['close']
+            prev_row = slow_his_data.iloc[-2]
+            close2 = prev_row['close']
             buy_date = current_timestamp
             # print(f"KC数据合并成功66")
 
-            current_time = datetime.strptime(current_timestamp, "%Y-%m-%d %H:%M:%S%z")
+            # current_time = datetime.strptime(current_timestamp, "%Y-%m-%d %H:%M:%S%z")
             account = MockAccount(initial_balance=balance)
             ETH_positions = account.positions.get(symbol, [])
             position_size = ETH_positions.get('position_size', 0) if isinstance(ETH_positions, dict) else 0
             position_side = ETH_positions.get('position_side', None) if isinstance(ETH_positions, dict) else None
             position_size = float(position_size)
-            current_minute = current_time.minute
-            current_hour = current_time.hour
+            current_minute = current_timestamp.minute
+            current_hour = current_timestamp.hour
             total_minutes = current_hour * 60 + current_minute
             # fifteen_minute = ((total_minutes - 1) // 15) * 15
             # five_now = ((total_minutes - 1) // 5) * 5  
+            kc_grid = 3
 
-            # fifteen_now = ((total_minutes - 1) // 15) * 15
-            five_now = ((total_minutes - 1) // 5) * 5  
-            five_key = f"FB|{symbol}|{five_now}"
+            fifteen_now = ((total_minutes - 1) // 15) * 15
+            # five_now = ((total_minutes - 1) // 5) * 5  
+            # five_key = f"FB|{symbol}|{five_now}"
 
-        #     # print(strategy_result)
+            # strategy_result,tide,mode,atr_slope = define_grid_strategy(symbol, slow_his_data, kc_grid)
+            # print(strategy_result)
 
-            five_key = f"KC_{symbol}_{five_now}"
+            fifteen_key = f"KC_{symbol}_{fifteen_now}"
 
-            if five_key not in cache:
+            if fifteen_key not in cache:
                 has_traded_in_block = False  # 重置交易标志
-                # if adx_value >= 30 :
-                #     if close2 < Medium_track and close1 > Medium_track and rsi_value > 50:
-                #         error_signal -= 1
-                #         if error_signal <= 0:
-                #             result = 1 
-                #             if position_size <= 0:
-                #                 execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 cache.set(five_key, True, timeout=86400)
-                #             if position_size > 0 and position_side == 'short':
-                #                 execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 cache.set(five_key, True, timeout=86400)
-                #         else:
+                # if close2 < kc_lower and close1 > kc_lower and adx_value > 20:
+                #     error_signal -= 1
+                #     if error_signal <= 0:
+                #         result = 1 
+                #         if position_size <= 0:
+                #             execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #             cache.set(fifteen_key, True, timeout=86400)
+                #         if position_size > 0 and position_side == 'short':
+                #             execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #             execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #             cache.set(fifteen_key, True, timeout=86400)
+                #     else:
+                #         has_traded_in_block = True 
+                #         cache.set(fifteen_key, True, timeout=86400)
+                # else:
+                #     if position_size > 0 and position_side == 'short':
+                #         result = 1
+                #         execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #         has_traded_in_block = True 
+                #         cache.set(fifteen_key, True, timeout=86400)
+
+                # if close2 > kc_upper and close1 < kc_upper and adx_value > 20:
+                #     error_signal -= 1
+                #     if error_signal <= 0:
+                #         result = 2 
+                #         if position_size <= 0:
+                #             execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #             cache.set(fifteen_key, True, timeout=86400)
+                #         if position_size > 0 and position_side == 'long':
+                #             execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #             execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #             cache.set(fifteen_key, True, timeout=86400)
+                #     else:
+                #         has_traded_in_block = True 
+                #         cache.set(fifteen_key, True, timeout=86400)
+                # else:
+                #     if position_size > 0 and position_side == 'long':
+                #         result = 2
+                #         execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
+                #         has_traded_in_block = True 
+                #         cache.set(fifteen_key, True, timeout=86400)
+                        
+                # if  close1 < kc_upper and close1 > kc_lower :
+                #     if close2 > Medium_track and close1 < Medium_track :
+                #         if position_size > 0 and position_side == 'long':
+                #             result = 2
+                #             execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
                 #             has_traded_in_block = True 
-                #             cache.set(five_key, True, timeout=86400)
-
-                #     if close2 > Medium_track and close1 < Medium_track and rsi_value > 50:
-                #         error_signal -= 1
-                #         if error_signal <= 0:
-                #             result = 2 
-                #             if position_size <= 0:
-                #                 execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 cache.set(five_key, True, timeout=86400)
-                #             if position_size > 0 and position_side == 'long':
-                #                 execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 cache.set(five_key, True, timeout=86400)
-                #         else:
+                #             cache.set(fifteen_key, True, timeout=86400)
+                #     if close2 < Medium_track and close1 > Medium_track :
+                #         if position_size > 0 and position_side == 'short':
+                #             result = 1
+                #             execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
                 #             has_traded_in_block = True 
-                #             cache.set(five_key, True, timeout=86400)
+                #             cache.set(fifteen_key, True, timeout=86400)
 
-                if 24 < adx_value <= 30:
-                    if position_size > 0 and position_side == 'short':
-                        result = 1
-                        execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-                        has_traded_in_block = True 
-                        cache.set(five_key, True, timeout=86400)
-                    elif position_size > 0 and position_side == 'long':
-                        result = 2
-                        execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-                        has_traded_in_block = True 
-                        cache.set(five_key, True, timeout=86400)
-
-
-                # 如果ADX小于28则发送振荡信号 由杨工出判别 .
-
-
-                # else:        
-
-                #     if  close1 < kc_upper and close1 > kc_lower :
-                #         if close2 > Medium_track and close1 < Medium_track :
-                #             if position_size > 0 and position_side == 'long':
-                #                 result = 2
-                #                 execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 has_traded_in_block = True 
-                #                 cache.set(five_key, True, timeout=86400)
-                #         if close2 < Medium_track and close1 > Medium_track :
-                #             if position_size > 0 and position_side == 'short':
-                #                 result = 1
-                #                 execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-                #                 has_traded_in_block = True 
-                #                 cache.set(five_key, True, timeout=86400)
 
                 # result = 2
                 # execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
                 # execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
 
-            # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
-            data_delet_middle(middle_his_data,all_middle_data,symbol)
+            print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
+            # data_delet_middle(middle_his_data,all_middle_data,symbol)
             # data_delet_slow(slow_his_data,all_slow_data,symbol)
             # cache.set(five_key_KC, True, timeout=300)
         # return all_slow_data
