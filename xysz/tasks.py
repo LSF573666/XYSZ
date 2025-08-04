@@ -7,7 +7,7 @@ from datetime import datetime
 from django.core.cache import cache
 
 from xysz.config import get_api_balance
-from xysz.env.BacktestEnv import calculate_adx, calculate_kc_channel, calculate_rsi_with_talib, define_grid_strategy, execute_buy_action, execute_sell_action
+from xysz.env.BacktestEnv import calculate_adx, calculate_kc_channel, calculate_rsi_with_talib, define_KC_strategy, define_grid_strategy, execute_buy_action, execute_sell_action
 from xysz.env.MockAccount import MockAccount
 from xysz.main_biget import cof_main, data_delet_middle, data_delet_slow
 from xysz.tests import send_mode_signal
@@ -30,12 +30,12 @@ def FB_strategy(self, ws_data):
     
     try:
         # time.sleep(10)
-        all_fast_data,all_middle_data = cof_main()
+        all_slow_data = cof_main()
 
         ws_type = ws_data['symbol'].replace("USDT", "")
         # print(ws_type)
         symbol = ws_type
-        slow_keys = list(all_fast_data.keys())
+        slow_keys = list(all_slow_data.keys())
         # print(slow_keys)
         cache_key = f"kline_{ws_type}_{ws_data['timestamp'].replace(' ', '_').replace(':', '-')}"
         if cache.get(cache_key):
@@ -45,9 +45,9 @@ def FB_strategy(self, ws_data):
         if ws_type in slow_keys:
             # 初始化历史数据
             # middle_his_data = all_middle_data[symbol]
-            fast_his_data = all_fast_data[symbol]
+            slow_his_data = all_slow_data[symbol]
             # print("当前 fast_his_data 末尾数据：")
-            # print(fast_his_data.tail(2))
+            # print(slow_his_data.tail(2))
 
             # 转换 WebSocket 数据为 DataFrame
             kline_data = pd.DataFrame(
@@ -56,29 +56,29 @@ def FB_strategy(self, ws_data):
             )
             # print(kline_data)
 
-            # 确保 fast_his_data 是 DataFrame
-            fast_his_data = pd.DataFrame(
-                fast_his_data,
+            # 确保 slow_his_data 是 DataFrame
+            slow_his_data = pd.DataFrame(
+                slow_his_data,
                 columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'Denominated_Coin_Volume', 'whatever']
             )
             # print(kline_data)
-            # print(fast_his_data.tail(2))
+            # print(slow_his_data.tail(2))
             # 确保列名匹配
-            # fast_his_data = middle_his_data.copy()  # 假设 middle_his_data 和 fast_his_data 结构类似
+            # slow_his_data = middle_his_data.copy()  # 假设 middle_his_data 和 slow_his_data 结构类似
             # 根据行数选择要合并的数据
 
             # 提取交集列
             # middle_cols = kline_data[middle_his_data.columns.intersection(kline_data.columns)]
-            slow_cols = kline_data[fast_his_data.columns.intersection(kline_data.columns)]
+            slow_cols = kline_data[slow_his_data.columns.intersection(kline_data.columns)]
 
             # 设置新索引（假设索引是时间戳）
             # middle_cols.index = [middle_his_data.index[-1] + 1]
-            slow_cols.index = [fast_his_data.index[-1] + 1]
+            slow_cols.index = [slow_his_data.index[-1] + 1]
 
             # 合并数据
             # middle_his_data = pd.concat([middle_his_data, middle_cols], ignore_index=False)
-            fast_his_data = pd.concat([fast_his_data, slow_cols], ignore_index=False)
-            # print(fast_his_data.tail(3))
+            slow_his_data = pd.concat([slow_his_data, slow_cols], ignore_index=False)
+            # print(slow_his_data.tail(3))
             # print(f"数据合并成功")
             # data_delet_slow(fast_his_data,all_fast_data,symbol)
 
@@ -115,7 +115,7 @@ def FB_strategy(self, ws_data):
             # fifteen_key = f"FB_{symbol}_{fifteen_now}"
             FB_key = 2 
 
-            strategy_result,adx_value = define_grid_strategy(symbol, fast_his_data, FB_key)
+            strategy_result = define_grid_strategy(symbol, slow_his_data, FB_key)
             # adx_value = calculate_adx(fast_his_data)
             # adx_value = adx_value.iloc[-1]
 
@@ -142,7 +142,7 @@ def FB_strategy(self, ws_data):
 
             # print(f"{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f}, 大区间:{dense_low:.3f} - {dense_high:.3f},小区间:{strategy_result['lower_bound']} - {strategy_result['upper_bound']}")
             # data_delet_middle(middle_his_data,all_middle_data,symbol)
-            # data_delet_slow(slow_his_data,all_slow_data,symbol)
+            data_delet_slow(slow_his_data,all_slow_data,symbol)
 
             # cache.set(cache_key,True, timeout=60)
             # cache.set(fifteen_key, True, timeout=900)
@@ -165,12 +165,12 @@ def KC_strategy(self, ws_data):
     five_minute = None
     try:
         # time.sleep(10)
-        all_fast_data, all_middle_data = cof_main()
+        all_slow_data = cof_main()
 
         ws_type = ws_data['symbol'].replace("USDT", "")
         # print(ws_type)
         symbol = ws_type
-        slow_keys = list(all_fast_data.keys())
+        slow_keys = list(all_slow_data.keys())
         # print(slow_keys)
         cache_key = f"kline_{ws_type}_{ws_data['timestamp'].replace(' ', '_').replace(':', '-')}"
         if cache.get(cache_key):
@@ -179,7 +179,7 @@ def KC_strategy(self, ws_data):
 
         if ws_type in slow_keys:
             # 初始化历史数据
-            middle_his_data = all_middle_data[symbol]
+            slow_his_data = all_slow_data[symbol]
             # fast_his_data = all_middle_data[symbol]
             # print("当前 slow_his_data 末尾数据：")
             # print(slow_his_data.tail(2))
@@ -192,47 +192,48 @@ def KC_strategy(self, ws_data):
             # print(kline_data)
 
             # 确保 slow_his_data 是 DataFrame
-            middle_his_data = pd.DataFrame(
-                middle_his_data,
+            slow_his_data = pd.DataFrame(
+                slow_his_data,
                 columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'Denominated_Coin_Volume', 'whatever']
             )
             # print(kline_data)
             # print(slow_his_data.tail(2))
             # 确保列名匹配
-            # slow_his_data = middle_his_data.copy()  # 假设 middle_his_data 和 slow_his_data 结构类似
+            # fast_his_data = slow_his_data.copy()  # 假设 slow_his_data 和 slow_his_data 结构类似
             # 根据行数选择要合并的数据
 
             # 提取交集列
-            # middle_cols = kline_data[middle_his_data.columns.intersection(kline_data.columns)]
-            middle_cols = kline_data[middle_his_data.columns.intersection(kline_data.columns)]
+            # fast_cols = kline_data[fast_his_data.columns.intersection(kline_data.columns)]
+            slow_cols = kline_data[slow_his_data.columns.intersection(kline_data.columns)]
 
             # 设置新索引（假设索引是时间戳）
-            # middle_cols.index = [middle_his_data.index[-1] + 1]
-            middle_cols.index = [middle_his_data.index[-1] + 1]
+            # fast_cols.index = [fast_his_data.index[-1] + 1]
+            slow_cols.index = [slow_his_data.index[-1] + 1]
 
             # 合并数据
-            # middle_his_data = pd.concat([middle_his_data, middle_cols], ignore_index=False)
-            middle_his_data = pd.concat([middle_his_data, middle_cols], ignore_index=False)
+            # fast_his_data = pd.concat([fast_his_data, fast_cols], ignore_index=False)
+            slow_his_data = pd.concat([slow_his_data, slow_cols], ignore_index=False)
         #     # print(slow_his_data.tail(3))
         #     # print(f"数据合并成功")
         #     data_delet_slow(slow_his_data,all_slow_data,symbol)
             # print(f"KC数据合并成功")
 
             kc_grid = 3
-            strategy_result,adx_value = define_grid_strategy(symbol, middle_his_data, kc_grid)
+            
+            adx_value = define_KC_strategy(symbol, slow_his_data, kc_grid)
 
-            # kc_upper,kc_lower,Medium_track = calculate_kc_channel(middle_his_data)
-            # adx_value = calculate_adx(middle_his_data)
-            # rsi_value = calculate_rsi_with_talib(middle_his_data)
+            # kc_upper,kc_lower,Medium_track = calculate_kc_channel(slow_his_data)
+            # adx_value = calculate_adx(slow_his_data)
+            # rsi_value = calculate_rsi_with_talib(slow_his_data)
             # adx_value = adx_value[-1]
             # # print(adx_value)
             # kc_upper = kc_upper.iloc[-1]
             # kc_lower = kc_lower.iloc[-1]
             # Medium_track = Medium_track.iloc[-1]
-            last_row = middle_his_data.iloc[-1]
+            last_row = slow_his_data.iloc[-1]
             current_timestamp = last_row['timestamp']
             close1 = last_row['close']
-            # prev_row = middle_his_data.iloc[-2]
+            # prev_row = slow_his_data.iloc[-2]
             # close2 = prev_row['close']
             buy_date = current_timestamp
             # print(f"KC数据合并成功66")
@@ -295,12 +296,12 @@ def KC_strategy(self, ws_data):
                         result = 1
                         execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
                         has_traded_in_block = True 
-                        cache.set(five_key, True, timeout=86400)
+                        cache.set(five_key, True, timeout=300)
                     elif position_size > 0 and position_side == 'long':
                         result = 2
                         execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
                         has_traded_in_block = True 
-                        cache.set(five_key, True, timeout=86400)
+                        cache.set(five_key, True, timeout=300)
 
 
                 # 如果ADX小于28则发送振荡信号 由杨工出判别 .
@@ -327,7 +328,7 @@ def KC_strategy(self, ws_data):
                 # execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
 
             # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
-            data_delet_middle(middle_his_data,all_middle_data,symbol)
+            data_delet_slow(slow_his_data,all_slow_data,symbol)
             # data_delet_slow(slow_his_data,all_slow_data,symbol)
             # cache.set(five_key_KC, True, timeout=300)
         # return all_slow_data

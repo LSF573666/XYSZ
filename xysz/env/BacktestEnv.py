@@ -24,6 +24,8 @@ has_traded_in_block = False
 error_signal = 0
 stop_five_transaction = False
 tide = None
+FBside = {}
+KCside = {}
 strategy_result = None
 balance = get_api_balance()
 algo_ids = []
@@ -276,52 +278,30 @@ def normal_distribution( data, variance_threshold=0.85):
     upper_bound = min(upper_bound, highest_high)
     return (float(lower_bound), float(upper_bound))
 
-"""5分钟网格"""
+
+"""FB设置信号判断"""
 def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
-    global tide,last_state,middle_current_time,stop_five_transaction
+    global FBside,last_state,middle_current_time,stop_five_transaction
     try:
-        if len(slow_his_data) < 200:
+        if len(slow_his_data) < 130:
             return {
                 'is_consolidation': False,
                 'signal': 'hold',
                 'reason': '数据不足4条'
             }
-        
+
+        n = len(slow_his_data)
+        safe_index = -120 if n >= 120 else -(n - 1)  # 确保不越界
+
         if grid_value == 3:
             strategy = 'KC'
             plan = 'KC'
-            atr_period = 14
-            result = 3
-            kc_upper,kc_lower,Medium_track = calculate_kc_channel(slow_his_data)
-            adx_value = calculate_adx(slow_his_data)
-            rsi_value = calculate_rsi_with_talib(slow_his_data)
-            adx_value = adx_value.iloc[-1]
-            rsi_value = rsi_value[-1]
-            # print(rsi_value)
-            kc_upper = kc_upper.iloc[-1]
-            kc_lower = kc_lower.iloc[-1]
-            Medium_track = Medium_track.iloc[-1]
-            last_row = slow_his_data.iloc[-1]
-            current_timestamp = last_row['timestamp']
-            close1 = last_row['close']
-            prev_row = slow_his_data.iloc[-2]
-            close2 = prev_row['close']
-            if adx_value >= 30 and rsi_value > 50:
-                mode = 2
-                if close2 < Medium_track and close1 > Medium_track:
-                    tide = 1
-                elif close2 < Medium_track and close1 > Medium_track:
-                    tide = 2
-            else:
-                mode = 1
-            # print(mode)
-
         else :
             strategy = 'grid_fly'
             plan = 'grid_fly'
             atr_period = 8
 
-            for i in range(200, 50-1, -1):
+            for i in range(33, 9-1, -1):
                 if len(slow_his_data) < i:
                     continue
 
@@ -350,7 +330,7 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                 if is_consolidation:
                     print(f"{strategy}_{symbol}现在为震荡区")
                     if middle_current_time is None:
-                        middle_current_time = slow_his_data.iloc[-451]['timestamp']
+                        middle_current_time = slow_his_data.iloc[safe_index]['timestamp']
                     lower_bound, upper_bound = normal_distribution(slow_his_data)
                     middle_close1 = slow_his_data.iloc[-1]['close']
                     middle_close2 = slow_his_data.iloc[-2]['close']
@@ -362,10 +342,10 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                     # print(type(middle_close2),type(lower_bound))
 
                     if middle_close1 > lower_bound and middle_close2 <= lower_bound:
-                        tide = 1
+                        FBside[symbol] = 1
                         result['signal'] = '1'
                     elif middle_close1 < upper_bound and middle_close2 >= upper_bound:
-                        tide = 2
+                        FBside[symbol] = 1
                         result['signal'] = '2'
                     if lower_bound is not None:
                         mode = 1
@@ -373,63 +353,227 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                 else:
                     mode = 2
 
-        if tide is None or tide == 0:
-            if grid_value==3 :
-                start_price = float(slow_his_data.iloc[-450]['close'])
+        if FBside.get(symbol, 0) == 0: 
+            if grid_value == 3 :
+                # print(safe_index)
+                start_price = float(slow_his_data.iloc[safe_index]['close'])
                 end_price = float(slow_his_data.iloc[-1]['close'])
+                # print(2)
             else:
-                start_price = float(slow_his_data.iloc[-450]['close'])
+                start_price = float(slow_his_data.iloc[safe_index]['close'])
                 end_price = float(slow_his_data.iloc[-1]['close'])
             is_uptrend = (end_price > start_price)
+            # print(is_uptrend)
             if is_uptrend:
-                tide = 1
+                FBside[symbol] = 1
             else:
-                tide = 2
+                FBside[symbol] = 2
 
+        # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
         slow_his_data = calculate_atr(slow_his_data, atr_period=atr_period)
-        five_atr = slow_his_data['atr'].iloc[-1]
+        minute_atr = slow_his_data['atr'].iloc[-1]
+        # print(five_atr)
         # atr_slope = slow_his_data['atr_slope'].iloc[-1]
-        if five_atr > 200 :
+
+        if symbol == 'BTC' and minute_atr > 35:
+            dpo = 0.3
+        elif symbol == 'ETH' and minute_atr > 3:
+            dpo = 0.3
+        elif symbol == 'SOL' and minute_atr > 0.12:
+            dpo = 0.3
+        elif symbol == 'DOGE' and minute_atr > 0.00015:
+            dpo = 0.3
+        elif symbol == 'XRP' and minute_atr > 0.0035:
             dpo = 0.3
         else:
             dpo = 0.2
 
+
+        side = FBside.get(symbol, None)
+
         base_key = f"{strategy}_{symbol}"
-        full_key = f"{base_key}_{plan}_{tide}_{mode}_{dpo}"
-        cached_value = cache.get(base_key)
+        full_key = f"{base_key}_{plan}_{side}_{mode}_{dpo}"
+        current_params = f"{plan}_{side}_{mode}_{dpo}"
 
-        if cached_value is None:
-            # 首次发送信号，并存储参数组合（无超时）
+        # 获取缓存中的历史记录（只存储最新的一条）
+        last_params = cache.get(base_key)
+
+        if last_params is None:
+            # 首次发送信号，并存储参数组合
             set_result = send_mode_signal(
                 coin=symbol,
                 plan=plan,
-                side=tide,
+                side=side,
                 mode=mode,
                 dpo=dpo
             )
             if set_result:
-                cache.set(base_key, f"{plan}_{tide}_{mode}_{dpo}", timeout=216000)
+                # 存储新记录
+                cache.set(base_key, current_params, timeout=86400)
                 print(f"震荡趋势信号:{full_key}")
-                return result,adx_value
+                return result
+        else:
+            if last_params != current_params:
+                # 参数变化，发送信号并更新缓存
+                set_result = send_mode_signal(
+                    coin=symbol,
+                    plan=plan,
+                    side=side,
+                    mode=mode,
+                    dpo=dpo
+                )
+                if set_result:
+                    # 更新记录
+                    cache.set(base_key, current_params, timeout=86400)
+                    print(f"震荡趋势已更新:{full_key}")
+                    return result
+            else:
+                # 参数未变化，不发送信号
+                print(f"震荡趋势未变化:{full_key}")
+                return result
+            
+    except Exception as e:
+        print(f"报错: {e}")
 
-        elif cached_value != f"{plan}_{tide}_{mode}_{dpo}":
-            # 参数变化，发送信号并更新缓存（无超时）
+
+"""KC设置信号判断"""
+def define_KC_strategy(symbol, slow_his_data, grid_value):
+    global KCside,last_state,middle_current_time
+    try:
+        if len(slow_his_data) < 139:
+            return {
+                'is_consolidation': False,
+                'signal': 'hold',
+                'reason': '数据不足4条'
+            }
+
+        n = len(slow_his_data)
+        safe_index = -120 if n >= 120 else -(n - 1)  # 确保不越界
+        adx_value = 1
+        
+        if grid_value == 3:
+            strategy = 'KC'
+            plan = 'KC'
+            atr_period = 14
+            kc_upper,kc_lower,Medium_track = calculate_kc_channel(slow_his_data)
+            # fast_kc_upper,fast_kc_lower,fast_Medium_track = calculate_kc_channel(fast_his_data)
+            adx_value = calculate_adx(slow_his_data)
+            rsi_value = calculate_rsi_with_talib(slow_his_data)
+            adx_value = adx_value.iloc[-1]
+            rsi_value = rsi_value[-1]
+            print(adx_value)
+            print(rsi_value)
+            kc_upper = kc_upper.iloc[-1]
+            kc_lower = kc_lower.iloc[-1]
+            Medium_track = Medium_track.iloc[-1]
+            print(Medium_track)
+            # print(slow_his_data.columns.tolist())
+            # print(fast_his_data.columns.tolist())
+            last_row = slow_his_data.iloc[-1]
+            close1 = last_row['close']
+            prev_row = slow_his_data.iloc[-2]
+            thiry_row = slow_his_data.iloc[-3]
+            close2 = prev_row['close']
+            close3 = thiry_row['close']
+            Medium_2 = prev_row['ema']
+            Medium_3 = thiry_row['ema']
+            print(Medium_2)
+
+            print(f"中轨2:{Medium_2},中轨1:{Medium_track},close3:{close3},close2:{close2},close1:{close1}")
+
+            # if adx_value >= 20:
+
+            mode = 2
+            if close3 < Medium_3 and close2 > Medium_2 and close1 > Medium_track and rsi_value > 50:
+                KCside[symbol] = 1
+            elif close3 > Medium_3 and close2 < Medium_2 and close1 < Medium_track and rsi_value < 50:
+                KCside[symbol] = 2
+
+            # else:
+            #     mode = 1
+            # print(mode)
+
+        if KCside.get(symbol, 0) == 0: 
+            if grid_value == 3 :
+                # print(safe_index)
+                start_price = float(slow_his_data.iloc[safe_index]['close'])
+                end_price = float(slow_his_data.iloc[-1]['close'])
+                # print(2)
+            else:
+                start_price = float(slow_his_data.iloc[safe_index]['close'])
+                end_price = float(slow_his_data.iloc[-1]['close'])
+            is_uptrend = (end_price > start_price)
+            # print(is_uptrend)
+            if is_uptrend:
+                KCside[symbol] = 1
+            else:
+                KCside[symbol] = 2
+
+        # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
+        
+        slow_his_data = calculate_atr(slow_his_data, atr_period=atr_period)
+        five_atr = slow_his_data['atr'].iloc[-1]
+        print(five_atr)
+
+        # atr_slope = slow_his_data['atr_slope'].iloc[-1]
+
+        if symbol == 'BTC' and five_atr > 100:
+            dpo = 0.3
+        elif symbol == 'ETH' and five_atr > 9:
+            dpo = 0.3
+        elif symbol == 'SOL' and five_atr > 0.45:
+            dpo = 0.3
+        elif symbol == 'DOGE' and five_atr > 0.00045:
+            dpo = 0.3
+        elif symbol == 'XRP' and five_atr > 0.01:
+            dpo = 0.3
+        else:
+            dpo = 0.2
+
+        side = KCside.get(symbol, None)
+        print(side)
+        base_key = f"{strategy}_{symbol}"
+        full_key = f"{base_key}_{plan}_{side}_{mode}_{dpo}"
+        current_params = f"{plan}_{side}_{mode}_{dpo}"
+
+        # 获取缓存中的历史记录（只存储最新的一条）
+        last_params = cache.get(base_key)
+
+        if last_params is None:
+            # 首次发送信号，并存储参数组合
             set_result = send_mode_signal(
                 coin=symbol,
                 plan=plan,
-                side=tide,
+                side=side,
                 mode=mode,
                 dpo=dpo
             )
             if set_result:
-                cache.set(base_key, f"{plan}_{tide}_{mode}_{dpo}", timeout=216000)
-                print(f"震荡趋势已更新:{full_key}")
-                return result,adx_value
+                # 存储新记录
+                cache.set(base_key, current_params, timeout=86400)
+                print(f"震荡趋势信号:{full_key}")
+                return adx_value
         else:
-            # 参数未变化，不发送信号
-            print(f"震荡趋势未变化:{full_key}")
-            return result,0
+            if last_params != current_params:
+                # 参数变化，发送信号并更新缓存
+                set_result = send_mode_signal(
+                    coin=symbol,
+                    plan=plan,
+                    side=side,
+                    mode=mode,
+                    dpo=dpo
+                )
+                if set_result:
+                    # 更新记录
+                    cache.set(base_key, current_params, timeout=86400)
+                    print(f"震荡趋势已更新:{full_key}")
+                    return adx_value
+            else:
+                # 参数未变化，不发送信号
+                print(f"震荡趋势未变化:{full_key}")
+                return 0
 
     except Exception as e:
         print(f"报错: {e}")
+
 

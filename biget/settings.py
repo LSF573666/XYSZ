@@ -123,7 +123,7 @@ USE_I18N = True
 
 USE_TZ = True
 
-ASGI_APPLICATION = 'biget.routing.application'
+# ASGI_APPLICATION = 'biget.routing.application'
 
 # CACHES = {
 #     "default": {

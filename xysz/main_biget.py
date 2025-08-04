@@ -48,36 +48,36 @@ def cof_main():
     slow_1_end_date = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
 
     all_fast_data = {}
-    all_middle_data = {}
-    # all_slow_data = {}
+    # all_middle_data = {}
+    all_slow_data = {}
     
     for pair in pairs:
         symbol = f"{pair}USDT"
         # 获取历史数据
-        fast_his_data = data_fetcher_BG.query_klines(symbol, granularity_fast, fast_start_date, fast_end_date)
+        # fast_his_data = data_fetcher_BG.query_klines(symbol, granularity_fast, fast_start_date, fast_end_date)
     
-        middle_his_data = data_fetcher_BG.query_klines(symbol, granularity_middle, middle_start_date, middle_end_date)
+        # middle_his_data = data_fetcher_BG.query_klines(symbol, granularity_middle, middle_start_date, middle_end_date)
     
-        # slow_his_data = data_fetcher_BG.query_klines(symbol, granularity_slow, slow_start_date, slow_end_date)
+        slow_his_data = data_fetcher_BG.query_klines(symbol, granularity_slow, slow_start_date, slow_end_date)
         # granularity_slow_1 = data_fetcher_BG.query_klines(symbol, granularity_slow_1, slow_1_start_date, slow_1_end_date)
         
         # 转换数据类型
-        fast_his_data = Utils.str_to_numeric(fast_his_data)
-        middle_his_data = Utils.str_to_numeric(middle_his_data)
-        # slow_his_data = Utils.str_to_numeric(slow_his_data)
+        # fast_his_data = Utils.str_to_numeric(fast_his_data)
+        # middle_his_data = Utils.str_to_numeric(middle_his_data)
+        slow_his_data = Utils.str_to_numeric(slow_his_data)
         # granularity_slow_1 = Utils.str_to_numeric(granularity_slow_1)
         
         # 添加日期列
-        fast_his_data['date'] = pd.to_datetime(fast_his_data['timestamp'])
-        middle_his_data['date'] = pd.to_datetime(middle_his_data['timestamp'])
-        # slow_his_data['date'] = pd.to_datetime(slow_his_data['timestamp'])
+        # fast_his_data['date'] = pd.to_datetime(fast_his_data['timestamp'])
+        # middle_his_data['date'] = pd.to_datetime(middle_his_data['timestamp'])
+        slow_his_data['date'] = pd.to_datetime(slow_his_data['timestamp'])
         # granularity_slow_1['date'] = pd.to_datetime(granularity_slow_1['timestamp'])
         # 保存到字典中
-        all_fast_data[pair] = fast_his_data
-        all_middle_data[pair] = middle_his_data
-        # all_slow_data[pair] = slow_his_data
+        # all_fast_data[pair] = fast_his_data
+        # all_middle_data[pair] = middle_his_data
+        all_slow_data[pair] = slow_his_data
     
-    return all_fast_data,all_middle_data
+    return all_slow_data
 
 
 def data_delet_middle(middle_his_data,all_middle_data,symbol):
@@ -100,7 +100,7 @@ def data_delet_middle(middle_his_data,all_middle_data,symbol):
     # 原有时间间隔检查（保持不变）
     middle_last_three = middle_data.tail(3)
     middle_last_three['timestamp_ms'] = middle_last_three['timestamp'].astype(int) // 10**6
-    slow_interval_to_remove = middle_last_three[middle_last_three['timestamp_ms'] % 900000 != 0]
+    slow_interval_to_remove = middle_last_three[middle_last_three['timestamp_ms'] % 300000 != 0]
     
     # 删除不符合时间间隔的行（如果有）
     all_middle_data[symbol] = middle_data.drop(slow_interval_to_remove.index)
@@ -137,11 +137,11 @@ def data_delet_slow(slow_his_data,all_slow_data,symbol):
     # 删除不符合时间间隔的行（如果有）
     all_slow_data[symbol] = slow_data.drop(slow_interval_to_remove.index)
 
-    print(f"{symbol} 数据删除成功")
+    # print(f"{symbol} 数据删除成功")
     # print("\nall_middle_data:")
     # print(all_middle_data[symbol].tail(2))
-    print("\nall_slow_data:")
-    print(all_slow_data[symbol].tail(3).to_string())
+    # print("\nall_slow_data:")
+    # print(all_slow_data[symbol].tail(3).to_string())
 
     return all_slow_data
 

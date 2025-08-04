@@ -15,7 +15,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A biget.celery worker --loglevel=info
+    command: celery -A biget.celery worker -l info -P gevent -c 4
     volumes:
       - .:/app
     env_file:

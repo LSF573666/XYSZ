@@ -75,7 +75,7 @@ class BigetWebSocket:
                         'open': float(kline[1]),
                         'high': float(kline[2]),
                         'low': float(kline[3]),
-                        'close': float(kline[4]),  # 修正为正确的close价格
+                        'close': float(kline[1]),  # 修正为正确的close价格
                         'volume': float(kline[5]),
                     }
 
@@ -83,9 +83,8 @@ class BigetWebSocket:
                     # print(kline_data)
                     if composite_key not in self.processed_keys:
                         from xysz.tasks import FB_strategy, KC_strategy
-                        # FB_strategy.delay(kline_data)
+                        FB_strategy.delay(kline_data)
                         KC_strategy.delay(kline_data)
-
                         self.processed_keys.add(composite_key)
                         if len(self.processed_keys) > 100:
                             self.processed_keys.clear()
@@ -178,11 +177,16 @@ class BigetWebSocket:
 
 def start_websocket_client():
     subscriptions = [
-        {"instId": "BTCUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
-        {"instId": "ETHUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
-        {"instId": "SOLUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
-        {"instId": "DOGEUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
-        {"instId": "XRPUSDT", "instType": "USDT-FUTURES", "granularity": "15m"},
+        {"instId": "BTCUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
+        {"instId": "ETHUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
+        {"instId": "SOLUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
+        {"instId": "DOGEUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
+        {"instId": "XRPUSDT", "instType": "USDT-FUTURES", "granularity": "1m"},
+        # {"instId": "BTCUSDT", "instType": "USDT-FUTURES", "granularity": "5m"},
+        # {"instId": "ETHUSDT", "instType": "USDT-FUTURES", "granularity": "5m"},
+        # {"instId": "SOLUSDT", "instType": "USDT-FUTURES", "granularity": "5m"},
+        # {"instId": "DOGEUSDT", "instType": "USDT-FUTURES", "granularity": "5m"},
+        # {"instId": "XRPUSDT", "instType": "USDT-FUTURES", "granularity": "5m"},
     ]
     
     ws = BigetWebSocket(subscriptions)
