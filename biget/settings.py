@@ -123,7 +123,7 @@ USE_I18N = True
 
 USE_TZ = True
 
-# ASGI_APPLICATION = 'biget.routing.application'
+ASGI_APPLICATION = 'biget.routing.application'
 
 # CACHES = {
 #     "default": {
@@ -163,7 +163,12 @@ CHANNEL_LAYERS = {
 
 CELERY_TIMEZONE = TIME_ZONE
 # CELERY_RESULT_BACKEND = 'django-db'  # 使用数据库存储结果（可选）
-CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'  # 关键：使用数据库调度
+CELERY_BEAT_SCHEDULE = {
+    'fetch-kline-every-10s': {
+        'task': 'biget.tasks.fetch_all_kline_data',
+        'schedule': 10.0,  # 每10秒执行[3](@ref)
+    }
+}
 
 # celery内容等消息的格式设置，默认json
 CELERY_ACCEPT_CONTENT = ['application/json', ]

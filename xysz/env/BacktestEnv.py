@@ -280,7 +280,7 @@ def normal_distribution( data, variance_threshold=0.85):
 
 
 """FB设置信号判断"""
-def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
+def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1.3):
     global FBside,last_state,middle_current_time,stop_five_transaction
     try:
         if len(slow_his_data) < 130:
@@ -334,11 +334,12 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                     lower_bound, upper_bound = normal_distribution(slow_his_data)
                     middle_close1 = slow_his_data.iloc[-1]['close']
                     middle_close2 = slow_his_data.iloc[-2]['close']
+                    print(middle_close1,middle_close2,lower_bound,upper_bound)
                     result.update({
                         'lower_bound': lower_bound,
                         'upper_bound': upper_bound
                     })
-                    # print(middle_close2,lower_bound,upper_bound)
+                    print(f"打印grid_{middle_close1},{middle_close2},{lower_bound},{upper_bound}")
                     # print(type(middle_close2),type(lower_bound))
 
                     if middle_close1 > lower_bound and middle_close2 <= lower_bound:
@@ -371,29 +372,74 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
 
         # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
         slow_his_data = calculate_atr(slow_his_data, atr_period=atr_period)
-        minute_atr = slow_his_data['atr'].iloc[-1]
-        # print(five_atr)
+        atr_value = slow_his_data['atr'].iloc[-1]
+        # print(atr_value)
         # atr_slope = slow_his_data['atr_slope'].iloc[-1]
 
-        if symbol == 'BTC' and minute_atr > 35:
-            dpo = 0.3
-        elif symbol == 'ETH' and minute_atr > 3:
-            dpo = 0.3
-        elif symbol == 'SOL' and minute_atr > 0.12:
-            dpo = 0.3
-        elif symbol == 'DOGE' and minute_atr > 0.00015:
-            dpo = 0.3
-        elif symbol == 'XRP' and minute_atr > 0.0035:
-            dpo = 0.3
-        else:
-            dpo = 0.2
+        if symbol == 'BTC':
+            if atr_value > 340:
+                dpo, tp = 1.3, 1.02
+            elif atr_value > 270:
+                dpo, tp = 1.1, 0.78
+            elif atr_value > 220:
+                dpo, tp = 0.9, 0.54
+            elif atr_value > 170:
+                dpo, tp = 0.7, 0.37
+            elif atr_value <= 170:
+                dpo, tp = 0.5, 0.25
+        elif symbol == 'ETH':
+            if atr_value > 18:
+                dpo, tp = 1.3, 1.02
+            elif atr_value > 16:
+                dpo, tp = 1.1, 0.78
+            elif atr_value > 13:
+                dpo, tp = 0.9, 0.54
+            elif atr_value > 10:
+                dpo, tp = 0.7, 0.37
+            elif atr_value <= 10:
+                dpo, tp = 0.5, 0.25
+        elif symbol == 'SOL':
+            if atr_value > 1.1:
+                dpo, tp = 1.3, 1.02
+            elif atr_value > 1:
+                dpo, tp = 1.1, 0.78
+            elif atr_value > 0.9:
+                dpo, tp = 0.9, 0.54
+            elif atr_value > 0.7:
+                dpo, tp = 0.7, 0.37
+            elif atr_value <= 0.7:
+                dpo, tp = 0.5, 0.25
+        elif symbol == 'DOGE':
+            if atr_value > 0.002:
+                dpo, tp = 1.3, 1.02
+            elif atr_value > 0.0018:
+                dpo, tp = 1.1, 0.78
+            elif atr_value > 0.0015:
+                dpo, tp = 0.9, 0.54
+            elif atr_value > 0.0012:
+                dpo, tp = 0.7, 0.37
+            elif atr_value <= 0.0012:
+                dpo, tp = 0.5, 0.25
+        elif symbol == 'XRP':
+            if atr_value > 0.0189:
+                dpo, tp = 1.3, 1.02
+            elif atr_value > 0.0176:
+                dpo, tp = 1.1, 0.78
+            elif atr_value > 0.0151:
+                dpo, tp = 0.9, 0.54
+            elif atr_value > 0.0137:
+                dpo, tp = 0.7, 0.37
+            elif atr_value <= 0.0137:
+                dpo, tp = 0.5, 0.25
+        if dpo is None:
+            dpo, tp = 0.5, 0.25
 
 
         side = FBside.get(symbol, None)
 
         base_key = f"{strategy}_{symbol}"
-        full_key = f"{base_key}_{plan}_{side}_{mode}_{dpo}"
-        current_params = f"{plan}_{side}_{mode}_{dpo}"
+        full_key = f"{base_key}_{plan}_{side}_{mode}_{dpo}_{tp}"
+        current_params = f"{plan}_{side}_{mode}_{dpo}_{tp}"
 
         # 获取缓存中的历史记录（只存储最新的一条）
         last_params = cache.get(base_key)
@@ -405,7 +451,8 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                 plan=plan,
                 side=side,
                 mode=mode,
-                dpo=dpo
+                dpo=dpo,
+                tp=tp
             )
             if set_result:
                 # 存储新记录
@@ -420,7 +467,8 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                     plan=plan,
                     side=side,
                     mode=mode,
-                    dpo=dpo
+                    dpo=dpo,
+                    tp=tp
                 )
                 if set_result:
                     # 更新记录
@@ -433,7 +481,7 @@ def define_grid_strategy(symbol, slow_his_data, grid_value, grid_pct=1):
                 return result
             
     except Exception as e:
-        print(f"报错: {e}")
+        print(f"FB报错: {e}")
 
 
 """KC设置信号判断"""
@@ -458,15 +506,15 @@ def define_KC_strategy(symbol, slow_his_data, grid_value):
             kc_upper,kc_lower,Medium_track = calculate_kc_channel(slow_his_data)
             # fast_kc_upper,fast_kc_lower,fast_Medium_track = calculate_kc_channel(fast_his_data)
             adx_value = calculate_adx(slow_his_data)
-            rsi_value = calculate_rsi_with_talib(slow_his_data)
+            # rsi_value = calculate_rsi_with_talib(slow_his_data)
             adx_value = adx_value.iloc[-1]
-            rsi_value = rsi_value[-1]
-            print(adx_value)
-            print(rsi_value)
+            # rsi_value = rsi_value[-1]
+            # print(adx_value)
+            # print(rsi_value)
             kc_upper = kc_upper.iloc[-1]
             kc_lower = kc_lower.iloc[-1]
             Medium_track = Medium_track.iloc[-1]
-            print(Medium_track)
+            # print(Medium_track)
             # print(slow_his_data.columns.tolist())
             # print(fast_his_data.columns.tolist())
             last_row = slow_his_data.iloc[-1]
@@ -477,68 +525,97 @@ def define_KC_strategy(symbol, slow_his_data, grid_value):
             close3 = thiry_row['close']
             Medium_2 = prev_row['ema']
             Medium_3 = thiry_row['ema']
-            print(Medium_2)
+            # print(Medium_2)
 
-            print(f"中轨2:{Medium_2},中轨1:{Medium_track},close3:{close3},close2:{close2},close1:{close1}")
 
-            # if adx_value >= 20:
-
-            mode = 2
-            if close3 < Medium_3 and close2 > Medium_2 and close1 > Medium_track and rsi_value > 50:
-                KCside[symbol] = 1
-            elif close3 > Medium_3 and close2 < Medium_2 and close1 < Medium_track and rsi_value < 50:
-                KCside[symbol] = 2
-
-            # else:
-            #     mode = 1
+            if adx_value >= 20:
+                mode = 1
+            else:
+                mode = 2
             # print(mode)
 
-        if KCside.get(symbol, 0) == 0: 
-            if grid_value == 3 :
-                # print(safe_index)
-                start_price = float(slow_his_data.iloc[safe_index]['close'])
-                end_price = float(slow_his_data.iloc[-1]['close'])
-                # print(2)
-            else:
-                start_price = float(slow_his_data.iloc[safe_index]['close'])
-                end_price = float(slow_his_data.iloc[-1]['close'])
-            is_uptrend = (end_price > start_price)
-            # print(is_uptrend)
-            if is_uptrend:
+            if close2 > Medium_2 and close1 > Medium_track :
                 KCside[symbol] = 1
-            else:
+            elif close2 < Medium_2 and close1 < Medium_track:
                 KCside[symbol] = 2
+
 
         # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
         
         slow_his_data = calculate_atr(slow_his_data, atr_period=atr_period)
-        five_atr = slow_his_data['atr'].iloc[-1]
-        print(five_atr)
+        atr_value = slow_his_data['atr'].iloc[-1]
+        # print(atr_value)
 
         # atr_slope = slow_his_data['atr_slope'].iloc[-1]
+        dpo, tp = None, None
 
-        if symbol == 'BTC' and five_atr > 100:
-            dpo = 0.3
-        elif symbol == 'ETH' and five_atr > 9:
-            dpo = 0.3
-        elif symbol == 'SOL' and five_atr > 0.45:
-            dpo = 0.3
-        elif symbol == 'DOGE' and five_atr > 0.00045:
-            dpo = 0.3
-        elif symbol == 'XRP' and five_atr > 0.01:
-            dpo = 0.3
-        else:
-            dpo = 0.2
+        if symbol == 'BTC':
+            if atr_value > 340:
+                dpo, tp = 1.2, 0.9
+            elif atr_value > 270:
+                dpo, tp = 1, 0.7
+            elif atr_value > 220:
+                dpo, tp = 0.8, 0.5
+            elif atr_value > 170:
+                dpo, tp = 0.6, 0.35
+            elif atr_value <= 170:
+                dpo, tp = 0.4, 0.2
+        elif symbol == 'ETH':
+            if atr_value > 18:
+                dpo, tp = 1.2, 0.9
+            elif atr_value > 16:
+                dpo, tp = 1, 0.7
+            elif atr_value > 13:
+                dpo, tp = 0.8, 0.5
+            elif atr_value > 10:
+                dpo, tp = 0.6, 0.35
+            elif atr_value <= 10:
+                dpo, tp = 0.4, 0.2
+        elif symbol == 'SOL':
+            if atr_value > 1.1:
+                dpo, tp = 1.2, 0.9
+            elif atr_value > 1:
+                dpo, tp = 1, 0.7
+            elif atr_value > 0.9:
+                dpo, tp = 0.8, 0.5
+            elif atr_value > 0.7:
+                dpo, tp = 0.6, 0.35
+            elif atr_value <= 0.7:
+                dpo, tp = 0.4, 0.2
+        elif symbol == 'DOGE':
+            if atr_value > 0.002:
+                dpo, tp = 1.2, 0.9
+            elif atr_value > 0.0018:
+                dpo, tp = 1, 0.7
+            elif atr_value > 0.0015:
+                dpo, tp = 0.8, 0.5
+            elif atr_value > 0.0012:
+                dpo, tp = 0.6, 0.35
+            elif atr_value <= 0.0012:
+                dpo, tp = 0.4, 0.2
+        elif symbol == 'XRP':
+            if atr_value > 0.0189:
+                dpo, tp = 1.2, 0.9
+            elif atr_value > 0.0176:
+                dpo, tp = 1, 0.7
+            elif atr_value > 0.0151:
+                dpo, tp = 0.8, 0.5
+            elif atr_value > 0.0137:
+                dpo, tp = 0.6, 0.35
+            elif atr_value <= 0.0137:
+                dpo, tp = 0.4, 0.2
+        if dpo is None:
+            dpo, tp = 0.4, 0.2
 
         side = KCside.get(symbol, None)
-        print(side)
+        # print(side)
         base_key = f"{strategy}_{symbol}"
-        full_key = f"{base_key}_{plan}_{side}_{mode}_{dpo}"
-        current_params = f"{plan}_{side}_{mode}_{dpo}"
+        full_key = f"{base_key}_{plan}_{side}_{mode}_{dpo}_{tp}"
+        current_params = f"{plan}_{side}_{mode}_{dpo}_{tp}"
 
         # 获取缓存中的历史记录（只存储最新的一条）
         last_params = cache.get(base_key)
-
+        print(f"中轨2:{Medium_2},中轨1:{Medium_track},close3:{close3},close2:{close2},close1:{close1},adx:{adx_value},mode:{mode},atr:{atr_value},dpo:{dpo},tp:{tp}")
         if last_params is None:
             # 首次发送信号，并存储参数组合
             set_result = send_mode_signal(
@@ -546,7 +623,8 @@ def define_KC_strategy(symbol, slow_his_data, grid_value):
                 plan=plan,
                 side=side,
                 mode=mode,
-                dpo=dpo
+                dpo=dpo,
+                tp=tp
             )
             if set_result:
                 # 存储新记录
@@ -561,7 +639,8 @@ def define_KC_strategy(symbol, slow_his_data, grid_value):
                     plan=plan,
                     side=side,
                     mode=mode,
-                    dpo=dpo
+                    dpo=dpo,
+                    tp=tp
                 )
                 if set_result:
                     # 更新记录
@@ -574,6 +653,4 @@ def define_KC_strategy(symbol, slow_his_data, grid_value):
                 return 0
 
     except Exception as e:
-        print(f"报错: {e}")
-
-
+        print(f"KC报错: {e}")

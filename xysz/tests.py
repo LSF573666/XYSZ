@@ -141,6 +141,7 @@ def send_mode_signal(
         plan: str,
         mode: int, 
         dpo: float = 0.0,
+        tp: float = 0.0,
         ws_url: str = "ws://8.216.32.13:8802"
     ):
     """
@@ -170,7 +171,8 @@ def send_mode_signal(
         "role": 101,
         "side": side,
         "mode": mode,
-        "dpo": dpo
+        "dpo": dpo,
+        "tp": tp
     }
     
     # 转换为JSON字符串
