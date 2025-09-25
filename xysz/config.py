@@ -11,7 +11,7 @@ KLINE_INTERVALS = {
 LOCAL_DATA_DIR = 'data'
 
 def get_api_balance():
-    initial_ba = 25
+    initial_ba = 10000
     return initial_ba
 
 # REDIS_CONFIG = {

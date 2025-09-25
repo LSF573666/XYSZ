@@ -1,76 +1,77 @@
-import requests
-import pandas as pd
-from datetime import datetime
+import aiohttp
+import asyncio
+import time
 
-def fetch_klines(exchange='binance', symbol='BTC', interval='1m', 
-                 start_time=None, end_time=None, limit=2000, get_more=0):
-    """
-    从服务器API获取K线数据
-    
-    参数:
-    exchange: 交易所名称 ('binance' 或 'okx')
-    symbol: 交易对符号 (如 'BTC', 'ETH'等)
-    interval: K线周期 ('1m', '5m', '15m', '30m')
-    start_time: 开始时间戳(毫秒)
-    end_time: 结束时间戳(毫秒)
-    limit: 返回记录数(默认2000，仅在get_more=0时生效)
-    get_more: 是否返回全部数据(1=是，0=否)
-    
-    返回:
-    pandas DataFrame 包含K线数据
-    """
-    # API端点
-    url = "http://47.236.144.131:8000/api/klines/fetch"
-    
-    # 查询参数
+
+async def fetch_klines(session, exchange, symbol, interval):
+    base_url = "http://47.236.144.131:8000/api/klines/fetch"
     params = {
         'exchange': exchange,
         'symbol': symbol,
         'interval': interval,
-        'limit': limit,
-        'get_more': get_more
+        'limit': 500,  # 注意到你已将limit改为500
+        'get_more': 0
     }
-    
-    # 添加可选的时间参数
-    if start_time:
-        params['start_time'] = start_time
-    if end_time:
-        params['end_time'] = end_time
-    
     try:
-        # 发送GET请求
-        response = requests.get(url, params=params)
-        response.raise_for_status()  # 检查请求是否成功
-        
-        # 解析JSON响应
-        data = response.json()
-        
-        # 转换为DataFrame
-        df = pd.DataFrame(data['data'])
-        
-        # 转换时间戳为可读格式
-        if 'open_time' in df.columns:
-            df['open_time'] = pd.to_datetime(df['open_time'], unit='ms')
-        if 'close_time' in df.columns:
-            df['close_time'] = pd.to_datetime(df['close_time'], unit='ms')
-            
-        return df
-    
-    except requests.exceptions.RequestException as e:
-        print(f"请求失败: {e}")
-        return None
+        async with session.get(base_url, params=params, timeout=10) as response:
+            if response.status == 200:
+                # 读取并解析JSON响应
+                data = await response.json()
+                print(f"成功: {exchange}, {symbol}, {interval}")
+                print(f"响应数据: {data}")
+                return True
+            else:
+                print(f"失败: {exchange}, {symbol}, {interval} - 状态码: {response.status}")
+                return False
+    except Exception as e:
+        print(f"错误: {exchange}, {symbol}, {interval} - {str(e)}")
+        return False
 
-# 示例用法
+
+async def main():
+    # 参数列表
+    exchanges = ['bitget', 'binance', 'okx']
+    symbols = ['BTC', 'ETH', 'SOL', 'DOGE', 'XRP']
+    intervals = ['1m', '5m', '15m', '30m']
+
+    # 统计
+    total_calls = 0
+    successful_calls = 0
+    failed_calls = 0
+
+    # 记录开始时间
+    start_time = time.time()
+
+    # 创建单一会话
+    async with aiohttp.ClientSession() as session:
+        # 创建任务列表
+        tasks = [
+            fetch_klines(session, exchange, symbol, interval)
+            for exchange in exchanges
+            for symbol in symbols
+            for interval in intervals
+        ]
+
+        # 并发运行所有任务
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 统计成功和失败
+        total_calls = len(tasks)
+        successful_calls = sum(1 for result in results if result is True)
+        failed_calls = total_calls - successful_calls
+
+    # 记录结束时间并计算耗时
+    end_time = time.time()
+    duration = end_time - start_time
+
+    # 输出总结
+    print("\n--- 总结 ---")
+    print(f"总请求数: {total_calls}")
+    print(f"成功请求: {successful_calls}")
+    print(f"失败请求: {failed_calls}")
+    print(f"总耗时: {duration:.2f} 秒")
+    print(f"平均每请求耗时: {duration / total_calls:.2f} 秒")
+
+
 if __name__ == "__main__":
-    # 获取最近2000条BTC的1分钟K线数据
-    df = fetch_klines(exchange='binance', symbol='BTC', interval='1m')
-    
-    if df is not None:
-        print(f"获取到 {len(df)} 条记录")
-        print(df.head())
-        
-        # 保存到CSV文件
-        df.to_csv('klines_data.csv', index=False)
-        print("数据已保存到 klines_data.csv")
-    else:
-        print("未能获取数据")   
+    asyncio.run(main())

@@ -83,8 +83,8 @@ class BigetWebSocket:
                     # print(kline_data)
                     if composite_key not in self.processed_keys:
                         from xysz.tasks import FB_strategy, KC_strategy
-                        FB_strategy.delay(kline_data)
-                        KC_strategy.delay(kline_data)
+                        # FB_strategy.delay(kline_data)
+                        # KC_strategy.delay(kline_data)
                         self.processed_keys.add(composite_key)
                         if len(self.processed_keys) > 100:
                             self.processed_keys.clear()

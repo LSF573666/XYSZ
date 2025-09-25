@@ -123,7 +123,7 @@ USE_I18N = True
 
 USE_TZ = True
 
-ASGI_APPLICATION = 'biget.routing.application'
+# ASGI_APPLICATION = 'biget.routing.application'
 
 # CACHES = {
 #     "default": {
@@ -137,13 +137,13 @@ ASGI_APPLICATION = 'biget.routing.application'
 #     }
 # }
 # 使用 Redis 容器名称（如 'redis'）代替 127.0.0.1
-CELERY_BROKER_URL = 'redis://redis:6379/0'
-CELERY_RESULT_BACKEND = 'redis://redis:6379/1'
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/1'
 
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://redis:6379/0",  # 使用 'redis' 而不是 127.0.0.1
+        "LOCATION": "redis://127.0.0.1:6379/0",  # 使用 'redis' 而不是 127.0.0.1
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
         },
@@ -154,7 +154,7 @@ CHANNEL_LAYERS = {
     "default": {
         "BACKEND": "channels_redis.core.RedisChannelLayer",
         "CONFIG": {
-            "hosts": [("redis", 6379)],  # 使用 'redis' 而不是 127.0.0.1
+            "hosts": [("127.0.0.1", 6379)],  # 使用 'redis' 而不是 127.0.0.1
             "symmetric_encryption_keys": None,
             "capacity": 10000,
         },
@@ -162,16 +162,15 @@ CHANNEL_LAYERS = {
 }
 
 CELERY_TIMEZONE = TIME_ZONE
-# CELERY_RESULT_BACKEND = 'django-db'  # 使用数据库存储结果（可选）
 CELERY_BEAT_SCHEDULE = {
-    'fetch-kline-every-10s': {
-        'task': 'biget.tasks.fetch_all_kline_data',
-        'schedule': 10.0,  # 每10秒执行[3](@ref)
+    'fetch-kline-every-20s': {
+        'task': 'xysz.tasks.fetch_klines_task',
+        'schedule': 20.0,
     }
 }
 
 # celery内容等消息的格式设置，默认json
-CELERY_ACCEPT_CONTENT = ['application/json', ]
+CELERY_ACCEPT_CONTENT = ['application/json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TASK_TRACK_STARTED = True
@@ -184,10 +183,12 @@ CELERY_RESULT_EXPIRES = 10
 
 # 任务限流
 CELERY_TASK_ANNOTATIONS = {'tasks.add': {'rate_limit': '10/s'}}
-CELERY_TASK_ROUTES = {
-    'xysz.tasks.FB_strategy': {'queue': 'celery'}
-}
 
+# CELERY_TASK_ROUTES = {
+#     'biget.tasks.fetch_binance_data': {'queue': 'binance_queue'},
+#     'biget.tasks.fetch_okx_data': {'queue': 'okx_queue'},
+#     'biget.tasks.fetch_bitget_data': {'queue': 'bitget_queue'},
+# }
 
 # Worker并发数量，一般默认CPU核数，可以不设置
 CELERY_WORKER_CONCURRENCY = 10

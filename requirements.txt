@@ -1,3 +1,6 @@
+aiohappyeyeballs==2.6.1
+aiohttp==3.12.15
+aiosignal==1.4.0
 amqp==5.3.1
 asgiref==3.8.1
 async-timeout==5.0.1
@@ -28,7 +31,10 @@ django-redis==6.0.0
 django-simpleui==2025.6.24
 django-timezone-field==7.1
 django_celery_results==2.6.0
+dnspython==2.7.0
+eventlet==0.40.2
 flower==2.0.1
+frozenlist==1.7.0
 gevent==25.5.1
 greenlet==3.2.3
 humanize==4.12.3
@@ -37,12 +43,16 @@ idna==3.10
 incremental==24.7.2
 kombu==5.5.4
 msgpack==1.1.1
-numpy==1.23.0
+multidict==6.6.3
+numpy==2.0.2
 packaging==25.0
 pandas==2.3.0
+pip-autoremove==0.10.0
+pip-chill==1.0.3
 pipdeptree==2.28.0
 prometheus_client==0.22.1
 prompt_toolkit==3.0.51
+propcache==0.3.2
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycparser==2.22
@@ -57,7 +67,6 @@ service-identity==24.2.0
 six==1.17.0
 sqlparse==0.5.3
 ta==0.11.0
-ta-lib==0.4.21
 tomli==2.2.1
 tornado==6.5.1
 Twisted==25.5.0
@@ -68,5 +77,6 @@ urllib3==2.5.0
 vine==5.1.0
 wcwidth==0.2.13
 websocket-client==1.8.0
+yarl==1.20.1
 zope.event==5.1
 zope.interface==7.2

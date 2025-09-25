@@ -9,7 +9,19 @@ services:
       - redis_data:/data
     restart: unless-stopped
 
-
+  websocket:
+    build: .
+    command: daphne -b 0.0.0.0 -p 6000 biget.asgi:application 
+    volumes:
+      - .:/app
+    ports:
+      - "6000:6000"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - DJANGO_SETTINGS_MODULE=biget.settings
+    depends_on:
+      - redis
+    restart: unless-stopped
 
   celery:
     build:
@@ -28,29 +40,18 @@ services:
 
     restart: unless-stopped
 
-  # celery_beat:
-  #   build: .
-  #   command: celery -A biget beat --loglevel=info
-  #   volumes:
-  #     - .:/app
-  #   env_file:
-  #     - .env
-  #   environment:
-  #     - DJANGO_SETTINGS_MODULE=biget.settings
-  #   depends_on:
-  #     - redis
-  #     - websocket
-  #   restart: unless-stopped
-
-  websocket:
+  celery_beat:
     build: .
-    command: python manage.py start_websocket
+    command: celery -A biget beat --loglevel=info
     volumes:
       - .:/app
+    env_file:
+      - .env
+    environment:
+      - DJANGO_SETTINGS_MODULE=biget.settings
     depends_on:
       - redis
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      - websocket
     restart: unless-stopped
 
 volumes:
