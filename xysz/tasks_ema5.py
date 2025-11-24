@@ -1,29 +1,28 @@
 import json
 from multiprocessing.pool import AsyncResult
 import time
-# import os, csv
+import os, csv
 import traceback
 from celery import shared_task
 
-# import redis
-# from django.conf import settings
-# from django.http import HttpResponse
+import redis
+from django.conf import settings
+from django.http import HttpResponse
 import pandas as pd
 from datetime import datetime
 from django.core.cache import cache
-# import numpy as np
+import numpy as np
 from redis.asyncio import Redis
 from xysz.config import get_api_balance
-from xysz.core.realtime_data_single import RealTimeETHDataAggregator
-from xysz.env.BacktestEnv import calculate_ema, define_KC_samtrstrategy, define_KC_strategy, define_KC_smartstrategy, define_grid_strategy, calculate_vi_manual
-# from xysz.env.MockAccount import MockAccount
+from xysz.env.BacktestEnv import calculate_ema, define_KC_samtrstrategy, define_KC_strategy, define_KC_smartstrategy, define_grid_strategy
+from xysz.env.MockAccount import MockAccount
 # import aiohttp
 import asyncio
 from xysz.tests import send_mode_signal
 
-from asgiref.sync import sync_to_async
-import nest_asyncio
-nest_asyncio.apply()
+# from asgiref.sync import sync_to_async
+# import nest_asyncio
+# nest_asyncio.apply()
 
 last_strategy_signal = None
 last_processed_time = None
@@ -369,8 +368,49 @@ def KC_samtrstrategy(self, exchange, symbol, interval, data):
         kc_sa = 6
         
         exchange, adx_value = define_KC_samtrstrategy(exchange, symbol, time, fast_data, kc_sa)
-       
+        # last_row = fast_data.iloc[-1]
+        # buy_date = last_row['timestamp']
+        # close1 = last_row['close']
+        # # print(f"时间戳打印:{exchange}, {symbol}, {interval},{buy_date}")
+        # # prev_row = slow_his_data.iloc[-2]
+        # # close2 = prev_row['close']
+        # # print(f"buy_date 的值是: {buy_date}, 类型是: {type(buy_date)}")
 
+        # current_time = pd.to_datetime(buy_date)
+        # current_minute = current_time.minute
+        # current_hour = current_time.hour
+        # total_minutes = current_hour * 60 + current_minute
+        # five_now = ((total_minutes - 1) // timelevel) * timelevel 
+        # smartstrategy_key = f"KCsmart_{exchange}_{symbol}_{timelevel}_{five_now}"
+
+        # if smartstrategy_key not in cache:
+        #     has_traded_in_block = False  # 重置交易标志
+        #     account = MockAccount(initial_balance=balance)
+        #     position_info = account.get_strategy_positions(strategy=plan, exchange=exchange, symbol=symbol)
+        #     # print(position_info)
+        #     position_data = position_info.get(exchange, {}).get(symbol)
+        #     # print(position_data)
+        #     # adx_value = 27
+        #     if position_data:
+        #         # entry_price = float(position_data.get("entry_price", 0))
+        #         buy_side = position_data.get("position_side")
+        #         # print(buy_side)
+            
+        #         if 25 < adx_value <= 30:
+        #             if buy_side == 2:
+        #                 result = 1
+        #                 execute_sell_action(result, exchange, symbol, time, buy_date, close1, grid=kc_grid)
+        #                 has_traded_in_block = True 
+        #                 cache.set(smartstrategy_key, True, timeout=time)
+        #             elif buy_side == 1:
+        #                 result = 2
+        #                 execute_sell_action(result, exchange, symbol, time, buy_date, close1, grid=kc_grid)
+        #                 has_traded_in_block = True 
+        #                 cache.set(smartstrategy_key, True, timeout=time)
+            # result = 2
+            # execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
+            # execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
+        # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
         return f"KC_samtr_{exchange}_{symbol}完成 "
 
     except Exception as e:
@@ -401,21 +441,14 @@ def EMA5strategy(self, exchange, symbol, interval, data):
             # print(f"数据已处理过: {cache_key}")
             return
         Ferryv = 5
-        side, mode = None, None
+        side = None
         if interval == '1m' :
             period=10
         elif interval == '5m' :
             period=5
         ema5_values = calculate_ema(fast_data,period=period)
-        _, _ ,vi_ratios = calculate_vi_manual(fast_data,period=14)
-        # print(fast_data.tail(5))
-        # print(vi_ratios)
         last_row = fast_data.iloc[-1]
-        vi_ratio1 = vi_ratios[-1]
-        # print(vi_ratio1)
         last2_row = fast_data.iloc[-2]
-        vi_ratio2 = vi_ratios[-2]
-        print(f"{exchange}, {symbol}, {interval},{vi_ratio2}")
         ema5_value1 = ema5_values.iloc[-1]
         ema5_value2 = ema5_values.iloc[-2]
         buy_date = last_row['timestamp']
@@ -425,30 +458,26 @@ def EMA5strategy(self, exchange, symbol, interval, data):
         dt = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S")
         formatted_time = dt.strftime("%H:%M")
         # print(ema5_value1,ema5_value2,close1,close2)
-        if 0.85 <= vi_ratio2 <= 1.15:
-            mode = 1 
-        else:
-            mode = 2 
 
         if close2 > ema5_value2 and close1 > ema5_value1 :
             side = 1
         elif close2 < ema5_value2 and close1 < ema5_value1 :
             side = 2
 
+        selltype = 'ALL'
+
         if side is not None:
             set_result = send_mode_signal(
                     coinPlatform = exchange,
-                    marketType = "FUTURES",
                     coin=symbol,
                     plan=plan,
                     time=time,
                     side=side,
-                    mode=mode,
+                    mode=1,
                     dpo=1,
                     dpo2=1,
                     tp=1,
                     sl=1,
-                    slPrice=1,
                     multiple=1,
                     multiple2=1
                 )
@@ -465,135 +494,141 @@ def EMA5strategy(self, exchange, symbol, interval, data):
         return error_msg
 
 
-async def fetch_and_distribute_redis_data():
-    r = None
-    try:
-        # 将同步操作放到线程池中执行
-        loop = asyncio.get_event_loop()
-        # 在线程池中执行同步的聚合器操作
-        aggregator = await loop.run_in_executor(
-            None, RealTimeETHDataAggregator
-        )
-        snapshot = await loop.run_in_executor(
-            None, aggregator.get_realtime_snapshot
-        )
-        print(f"当前价格: ${snapshot['price']['price']}")
-        
-        r = Redis(
-            host='47.84.194.2',
-            port=6379,
-            password='yyz135246',
-            db=0,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5
-        )
-        await r.ping()
-        print("Redis连接成功！")
-        target_exchanges = {'bitget', 'binance', 'okx'}
-        target_symbols = {'btc', 'eth', 'sol', 'doge', 'xrp'}
-        target_intervals = {'1m', '5m', '15m', '1h'}
-        start_time = time.time()
-        total_tasks = 0
-        successful_tasks = 0
-        # 异步 SCAN
-        cursor = 0
-        pattern = "*_data_*_*"
-        keys = []
-        while True:
-            cursor, partial_keys = await r.scan(cursor=cursor, match=pattern, count=100)
-            keys.extend(partial_keys)
-            if cursor == 0:
-                break
-        print(f"找到 {len(keys)} 个符合格式的键")
-        tasks_to_dispatch = []
-        for key in keys:
-            if key.endswith(('setMode', 'lastprice', 'spot')):
-                continue
-            parts = key.split('_')
-            if len(parts) != 4:
-                continue
-            exchange, _, symbol, interval = parts
-            exchange, symbol, interval = exchange.lower(), symbol.lower(), interval.lower()
-            if (exchange in target_exchanges and
-                symbol in target_symbols and
-                interval in target_intervals):
-                value = await r.get(key)
-                if not value:
-                    continue
-                try:
-                    data = json.loads(value)
-                    tasks_to_dispatch.append({
-                        'exchange': exchange,
-                        'symbol': symbol,
-                        'interval': interval,
-                        'data': data
-                    })
-                except json.JSONDecodeError:
-                    print(f"JSON解析失败: {key}")
-        # 批量分发
-        for task_info in tasks_to_dispatch:
-            total_tasks += 1
-            try:
-                # FB_strategy.delay(
-                #     task_info['exchange'],
-                #     task_info['symbol'],
-                #     task_info['interval'],
-                #     task_info['data']
-                # )
-                # KC_strategy.delay(
-                #     task_info['exchange'],
-                #     task_info['symbol'],
-                #     task_info['interval'],
-                #     task_info['data']
-                # )
-                # KC_smartstrategy.delay(
-                #     task_info['exchange'],
-                #     task_info['symbol'],
-                #     task_info['interval'],
-                #     task_info['data']
-                # )
-                EMA5strategy.delay(
-                    task_info['exchange'],
-                    task_info['symbol'],
-                    task_info['interval'],
-                    task_info['data']
-                )
-                KC_samtrstrategy.delay(
-                    task_info['exchange'],
-                    task_info['symbol'],
-                    task_info['interval'],
-                    task_info['data']
-                )
-                successful_tasks += 1
-            except Exception as e:
-                print(f"分发任务失败: {task_info} - {e}")
-        duration = time.time() - start_time
-        print(f"总任务: {total_tasks}, 成功: {successful_tasks}, 耗时: {duration:.2f}s")
-        return {
-            'total_tasks': total_tasks,
-            'successful_tasks': successful_tasks,
-            'duration': round(duration, 2),
-            'processed_keys': len(keys)
-        }
-    except Exception as e:
-        print(f"Redis错误: {e}")
-        return {
-            'status': 'error',
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }
-    # finally:
-    #     if r is not None:
-    #         await r.close()
-
-
 @shared_task(bind=True, time_limit=30, soft_time_limit=30)
 def fetch_klines_task(self):
+    async def fetch_and_distribute_redis_data():
+        r = None
+        try:
+            r = Redis(
+                host='47.84.194.2',
+                port=6379,
+                password='yyz135246',
+                db=0,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=5
+            )
+            await r.ping()
+            print("Redis连接成功！")
+
+            target_exchanges = {'bitget', 'binance', 'okx'}
+            target_symbols = {'btc', 'eth', 'sol', 'doge', 'xrp'}
+            target_intervals = {'1m', '5m', '15m', '1h'}
+
+            start_time = time.time()
+            total_tasks = 0
+            successful_tasks = 0
+
+            # 异步 SCAN
+            cursor = 0
+            pattern = "*_data_*_*"
+            keys = []
+
+            while True:
+                cursor, partial_keys = await r.scan(cursor=cursor, match=pattern, count=100)
+                keys.extend(partial_keys)
+                if cursor == 0:
+                    break
+
+            print(f"找到 {len(keys)} 个符合格式的键")
+
+            tasks_to_dispatch = []
+            for key in keys:
+                if key.endswith(('setMode', 'lastprice', 'spot')):
+                    continue
+
+                parts = key.split('_')
+                if len(parts) != 4:
+                    continue
+
+                exchange, _, symbol, interval = parts
+                exchange, symbol, interval = exchange.lower(), symbol.lower(), interval.lower()
+
+                if (exchange in target_exchanges and
+                    symbol in target_symbols and
+                    interval in target_intervals):
+
+                    value = await r.get(key)
+                    if not value:
+                        continue
+
+                    try:
+                        data = json.loads(value)
+                        tasks_to_dispatch.append({
+                            'exchange': exchange,
+                            'symbol': symbol,
+                            'interval': interval,
+                            'data': data
+                        })
+                    except json.JSONDecodeError:
+                        print(f"JSON解析失败: {key}")
+
+            # 批量分发
+            for task_info in tasks_to_dispatch:
+                total_tasks += 1
+                try:
+                    # FB_strategy.delay(
+                    #     task_info['exchange'],
+                    #     task_info['symbol'],
+                    #     task_info['interval'],
+                    #     task_info['data']
+                    # )
+                    # KC_strategy.delay(
+                    #     task_info['exchange'],
+                    #     task_info['symbol'],
+                    #     task_info['interval'],
+                    #     task_info['data']
+                    # )
+                    # KC_smartstrategy.delay(
+                    #     task_info['exchange'],
+                    #     task_info['symbol'],
+                    #     task_info['interval'],
+                    #     task_info['data']
+                    # )
+                    # EMA5strategy.delay(
+                    #     task_info['exchange'],
+                    #     task_info['symbol'],
+                    #     task_info['interval'],
+                    #     task_info['data']
+                    # )
+                    KC_samtrstrategy.delay(
+                        task_info['exchange'],
+                        task_info['symbol'],
+                        task_info['interval'],
+                        task_info['data']
+                    )
+                    successful_tasks += 1
+                except Exception as e:
+                    print(f"分发任务失败: {task_info} - {e}")
+
+            duration = time.time() - start_time
+            print(f"总任务: {total_tasks}, 成功: {successful_tasks}, 耗时: {duration:.2f}s")
+
+            return {
+                'total_tasks': total_tasks,
+                'successful_tasks': successful_tasks,
+                'duration': round(duration, 2),
+                'processed_keys': len(keys)
+            }
+
+        except Exception as e:
+            print(f"Redis错误: {e}")
+            return {
+                'status': 'error',
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }
+        finally:
+            if r is not None:
+                await r.close()
+
+    # 安全运行异步函数
     try:
+        # 安全运行异步函数
         result = asyncio.run(fetch_and_distribute_redis_data())
         return {"status": "success", "data": result}
     except Exception as e:
+        # 捕获所有异常（包括 Redis 连接失败、JSON 错误等）
         return {
             "status": "error",
             "error": str(e),

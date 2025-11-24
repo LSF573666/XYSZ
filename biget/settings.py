@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 
 import os
 from pathlib import Path
+
 # from celery import celery
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -89,7 +90,7 @@ DATABASES = {
     }
 }
 
-
+# REDIS_INITIALIZED = sync_redis_client()
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
 
@@ -137,18 +138,24 @@ USE_TZ = True
 #     }
 # }
 # 使用 Redis 容器名称（如 'redis'）代替 127.0.0.1
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379/0'
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/1'
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/1'
 
+# 缓存使用不同的 Redis 实例或数据库
 CACHES = {
     "default": {
         "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": "redis://127.0.0.1:6379/0",  # 使用 'redis' 而不是 127.0.0.1
+        "LOCATION": "redis://localhost:6379/2",  # 专门的缓存数据库
         "OPTIONS": {
             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
         },
     }
 }
+
+# 会话存储也可以单独配置
+# SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+# SESSION_CACHE_ALIAS = "default"
 
 CHANNEL_LAYERS = {
     "default": {
@@ -171,27 +178,30 @@ CELERY_BEAT_SCHEDULE = {
 
 # celery内容等消息的格式设置，默认json
 CELERY_ACCEPT_CONTENT = ['application/json']
+
+# === 序列化：轻量快速 ===
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TASK_TRACK_STARTED = True
-# 为任务设置超时时间，单位秒。超时即中止，执行下个任务。
-CELERY_TASK_TIME_LIMIT = 300
+CELERY_ACCEPT_CONTENT = ['json']  # 正确写法，只写一次
 
-# 为存储结果设置过期日期，默认1天过期。如果beat开启，Celery每天会自动清除。
-# 设为0，存储结果永不过期
-CELERY_RESULT_EXPIRES = 10
+# === 高并发核心优化 ===
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1        # 每个 worker 预取 1 个任务
+CELERY_WORKER_CONCURRENCY = 60               # 和 docker-compose 一致
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 100      # 防内存泄漏
 
-# 任务限流
-CELERY_TASK_ANNOTATIONS = {'tasks.add': {'rate_limit': '10/s'}}
+# === 连接池：支持 60+ 并发 ===
+CELERY_BROKER_POOL_LIMIT = 100
+CELERY_BROKER_CONNECTION_MAX_RETRIES = 3
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
-# CELERY_TASK_ROUTES = {
-#     'biget.tasks.fetch_binance_data': {'queue': 'binance_queue'},
-#     'biget.tasks.fetch_okx_data': {'queue': 'okx_queue'},
-#     'biget.tasks.fetch_bitget_data': {'queue': 'bitget_queue'},
-# }
+# === 任务超时：软硬双保险 ===
+CELERY_TASK_SOFT_TIME_LIMIT = 10   # 软超时：10 秒，抛异常
+CELERY_TASK_TIME_LIMIT = 15        # 硬超时：15 秒，杀进程
 
-# Worker并发数量，一般默认CPU核数，可以不设置
-CELERY_WORKER_CONCURRENCY = 10
+# === 结果清理：短任务不需要存 ===
+# CELERY_RESULT_BACKEND = None       # 关键！关闭结果存储
+CELERY_RESULT_EXPIRES = 300      # 已无效
+# CELERY_TASK_RESULT_EXPIRES = 3600
 
 # 每个worker执行了多少任务就会死掉，默认是无限的
 CELERY_WORKER_MAX_TASKS_PER_CHILD = 200

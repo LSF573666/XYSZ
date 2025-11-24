@@ -8,7 +8,7 @@ from typing import Tuple, Dict
 from xysz.main_biget import cof_main
 
 def fetch_redis_data(
-    host: str = '8.216.32.13',
+    host: str = '47.84.194.2',
     port: int = 6379,
     password: str = 'yyz135246',
     db: int = 0

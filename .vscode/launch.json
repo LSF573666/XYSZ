@@ -17,6 +17,13 @@
             "django": true
         },
         {
+          "name": "Python Debugger: Python File",
+          "type": "debugpy",
+          "request": "launch",
+          "program": "${file}",
+          "console": "integratedTerminal"
+      },
+        {
       "name": "Python: Celery Worker",
       "type": "debugpy",
       "request": "launch",

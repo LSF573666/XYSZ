@@ -11,13 +11,13 @@ services:
 
   websocket:
     build: .
-    command: daphne -b 0.0.0.0 -p 6000 biget.asgi:application 
+    command: daphne -b 0.0.0.0 -p 6000 biget.asgi:application
     volumes:
       - .:/app
     ports:
       - "6000:6000"
     environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://localhost:6379/0
       - DJANGO_SETTINGS_MODULE=biget.settings
     depends_on:
       - redis
@@ -27,18 +27,32 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A biget.celery worker -l info -P gevent -c 4
+    command: >
+      celery -A biget worker
+      --loglevel=info
+      --pool=eventlet
+      --concurrency=60
+      --max-tasks-per-child=100
+      --without-gossip
+      --without-mingle
+      --without-heartbeat
+      -E
     volumes:
       - .:/app
     env_file:
       - .env
     environment:
       - DJANGO_SETTINGS_MODULE=biget.settings
+      - C_FORCE_ROOT=1
     depends_on:
       - redis
       - websocket
-
     restart: unless-stopped
+    # 资源限制修正位置（与command、volumes平级）
+    mem_limit: 3G
+    mem_reservation: 1G
+    cpus: 2.0
+    stop_grace_period: 20s
 
   celery_beat:
     build: .
@@ -51,9 +65,36 @@ services:
       - DJANGO_SETTINGS_MODULE=biget.settings
     depends_on:
       - redis
-      - websocket
     restart: unless-stopped
+    # 资源限制统一格式
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    stop_grace_period: 1m
+
+  flower:
+    build: .
+    command: >
+      celery -A biget flower
+      --port=5555
+      --persistent=True
+      --events_poll_interval=0
+      --no_events
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://localhost:6379/0
+      - DJANGO_SETTINGS_MODULE=biget.settings
+    depends_on:
+      - redis
+      - celery
+    restart: unless-stopped
+    # 资源限制统一格式
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
 volumes:
   redis_data:
-  staticfiles:

@@ -30,9 +30,12 @@ async def fetch_klines(session, exchange, symbol, interval):
 
 async def main():
     # 参数列表
-    exchanges = ['bitget', 'binance', 'okx']
-    symbols = ['BTC', 'ETH', 'SOL', 'DOGE', 'XRP']
-    intervals = ['1m', '5m', '15m', '30m']
+    exchanges = ['bitget']
+    # exchanges = ['bitget', 'binance', 'okx']
+    # symbols = ['BTC', 'ETH', 'SOL', 'DOGE', 'XRP']
+    symbols = ['ETH']
+    # intervals = ['1m', '5m', '15m', '1h']
+    intervals = ['1m']
 
     # 统计
     total_calls = 0
