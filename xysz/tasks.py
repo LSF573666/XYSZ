@@ -1,28 +1,38 @@
-import json
 from multiprocessing.pool import AsyncResult
 import time
-# import os, csv
+import os, csv
 import traceback
 from celery import shared_task
+from celery.signals import worker_ready
 
-# import redis
-# from django.conf import settings
-# from django.http import HttpResponse
+from django.conf import settings
+from django.http import HttpResponse
 import pandas as pd
 from datetime import datetime
 from django.core.cache import cache
-# import numpy as np
-from redis.asyncio import Redis
+import numpy as np
 from xysz.config import get_api_balance
-from xysz.core.realtime_data_single import RealTimeETHDataAggregator
-from xysz.env.BacktestEnv import calculate_ema, define_KC_samtrstrategy, define_KC_strategy, define_KC_smartstrategy, define_grid_strategy, calculate_vi_manual
-# from xysz.env.MockAccount import MockAccount
-# import aiohttp
+from xysz.env.Strategy import calculate_ema, define_KC_samtrstrategy, define_KC_strategy, define_KC_smartstrategy, define_grid_strategy, calculate_vi_manual, df_Martin_strategy, df_MoneyToad_strategy, df_ferry_strategy
+from xysz.env.MockAccount import MockAccount
+import aiohttp
 import asyncio
-from xysz.tests import send_mode_signal
 
 from asgiref.sync import sync_to_async
 import nest_asyncio
+
+# Ferry 用 period=480 + atr=14，至少需要 494 根；统一拉 500+
+KLINE_LIMIT = 500
+OKX_KLINE_LIMIT = 300  # OKX 单次最多 300，需分页凑满
+BINANCE_FUTURES_KLINES_URL = 'https://fapi.binance.com/fapi/v1/klines'
+OKX_CANDLES_URL = 'https://www.okx.com/api/v5/market/candles'
+OKX_HISTORY_CANDLES_URL = 'https://www.okx.com/api/v5/market/history-candles'
+OKX_INTERVAL_MAP = {
+    '1m': '1m',
+    '5m': '5m',
+    '15m': '15m',
+    '1h': '1H',
+}
+
 nest_asyncio.apply()
 
 last_strategy_signal = None
@@ -34,6 +44,11 @@ KLRT_side = {}
 stop_five_transaction = False
 strategy_result = None
 balance = get_api_balance()
+
+# 清理价格数据
+def clean_price(price_str):
+    return price_str.replace('$', '').replace(' 附近', '').replace('附近', '').strip()
+
 def process_kline_data(exchange, symbol, interval, data):
     """
     处理不同交易所的K线数据，标准化为统一格式
@@ -73,11 +88,24 @@ def process_kline_data(exchange, symbol, interval, data):
 
             
         elif exchange == 'bitget':
-            if isinstance(data, list):
-                df = pd.DataFrame(
-                    data,
-                    columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'volCcy']
-                )
+            # 处理Bitget数据格式 - 修正版
+            if isinstance(data, list) and len(data) > 0:
+                # 检查数据格式：如果是字符串列表
+                if isinstance(data[0], list) and isinstance(data[0][0], str):
+                    df = pd.DataFrame(
+                        data,
+                        columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'volCcy']
+                    )
+                else:
+                    # 如果是其他格式，尝试直接创建DataFrame
+                    df = pd.DataFrame(data)
+                    # 确保有足够的列
+                    if len(df.columns) >= 6:
+                        df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume'] + list(df.columns[6:])
+                    else:
+                        raise ValueError(f"Bitget数据列数不足: {len(df.columns)}")
+            else:
+                raise ValueError(f"Bitget数据格式异常: {type(data)}")
             
         elif exchange == 'binance':
             # 处理Binance数据格式
@@ -119,7 +147,7 @@ def process_kline_data(exchange, symbol, interval, data):
         return pd.DataFrame(), time_params
 
 @shared_task(bind=True, max_retries=3)
-def FB_strategy(self, exchange, symbol, interval, data):
+def FB_strategy(self, exchange, symbol, interval, data, label):
     try:
         df, time_params = process_kline_data(exchange, symbol, interval, data)
         # time = time_params['seconds']      # 获取秒数 → 300
@@ -205,7 +233,7 @@ def FB_strategy(self, exchange, symbol, interval, data):
         return {"status": "error", "message": str(e)}
 
 @shared_task(bind=True)
-def KC_strategy(self, exchange, symbol, interval, data):
+def KC_strategy(self, exchange, symbol, interval, data, label):
     global has_traded_in_block,account
     try:
         fast_data, time_params = process_kline_data(exchange, symbol, interval, data)
@@ -226,46 +254,11 @@ def KC_strategy(self, exchange, symbol, interval, data):
             # print(f"数据已处理过: {cache_key}")
             return
         kc_grid = 3
-        exchange, adx_value = define_KC_strategy(exchange, symbol, time, fast_data, kc_grid)
+        result = define_KC_strategy(exchange, symbol, time, fast_data, kc_grid)
+        if not isinstance(result, tuple):
+            return f"KC_strategy_{exchange}_{symbol}跳过"
+        exchange, adx_value = result
 
-        # last_row = fast_data.iloc[-1]
-        # buy_date = last_row['timestamp']
-        # close1 = last_row['close']
-        # # prev_row = slow_his_data.iloc[-2]
-        # # close2 = prev_row['close']
-        # current_time = pd.to_datetime(buy_date)
-        # current_minute = current_time.minute
-        # current_hour = current_time.hour
-        # total_minutes = current_hour * 60 + current_minute
-        # strategy_now = ((total_minutes - 1) // timelevel) * timelevel 
-        # # print(strategy_result)
-        # # five_key = f"KC_{symbol}_{five_now}"
-        # strategy_key = f"KC_{exchange}_{symbol}_{timelevel}_{strategy_now}"
-        # if strategy_key not in cache:
-        #     has_traded_in_block = False  # 重置交易标志
-        #     # adx_value = 27
-        #     if 25 < adx_value <= 30:
-        #         account = MockAccount(initial_balance=balance)
-        #         position_info = account.get_strategy_positions(strategy=plan, exchange=exchange, symbol=symbol)
-        #         position_data = position_info.get(exchange, {}).get(symbol)
-        #         if position_data:
-        #             # entry_price = float(position_data.get("entry_price", 0))
-        #             buy_side = position_data.get("position_side")
-        #             if 25 < adx_value <= 30:
-        #                 if buy_side == 2:
-        #                     result = 1
-        #                     execute_sell_action(result, exchange, symbol, time, buy_date, close1, grid=kc_grid)
-        #                     has_traded_in_block = True 
-        #                     cache.set(strategy_key, True, timeout=time)
-        #                 elif buy_side == 1:
-        #                     result = 2
-        #                     execute_sell_action(result, exchange, symbol, time, buy_date, close1, grid=kc_grid)
-        #                     has_traded_in_block = True 
-        #                     cache.set(strategy_key, True, timeout=time)
-            # result = 2
-            # execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-            # execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
-        # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
         return f"KC_strategy_{exchange}_{symbol}完成"
 
     except Exception as e:
@@ -275,7 +268,7 @@ def KC_strategy(self, exchange, symbol, interval, data):
         return error_msg
     
 @shared_task(bind=True)
-def KC_smartstrategy(self, exchange, symbol, interval, data):
+def KC_smartstrategy(self, exchange, symbol, interval, data, label):
     global has_traded_in_block,account
     try:
         fast_data, time_params = process_kline_data(exchange, symbol, interval, data)
@@ -295,50 +288,11 @@ def KC_smartstrategy(self, exchange, symbol, interval, data):
             return
         kc_grid = 4
         
-        exchange, adx_value = define_KC_smartstrategy(exchange, symbol, time, fast_data, kc_grid)
-        last_row = fast_data.iloc[-1]
-        buy_date = last_row['timestamp']
-        close1 = last_row['close']
-        # print(f"时间戳打印:{exchange}, {symbol}, {interval},{buy_date}")
-        # prev_row = slow_his_data.iloc[-2]
-        # close2 = prev_row['close']
-        # print(f"buy_date 的值是: {buy_date}, 类型是: {type(buy_date)}")
+        result = define_KC_smartstrategy(exchange, symbol, time, fast_data, kc_grid)
+        if not isinstance(result, tuple):
+            return f"KC_smart_{exchange}_{symbol}跳过"
+        exchange, adx_value = result
 
-        current_time = pd.to_datetime(buy_date)
-        current_minute = current_time.minute
-        current_hour = current_time.hour
-        total_minutes = current_hour * 60 + current_minute
-        five_now = ((total_minutes - 1) // timelevel) * timelevel 
-        smartstrategy_key = f"KCsmart_{exchange}_{symbol}_{timelevel}_{five_now}"
-
-        # if smartstrategy_key not in cache:
-        #     has_traded_in_block = False  # 重置交易标志
-        #     account = MockAccount(initial_balance=balance)
-        #     position_info = account.get_strategy_positions(strategy=plan, exchange=exchange, symbol=symbol)
-        #     # print(position_info)
-        #     position_data = position_info.get(exchange, {}).get(symbol)
-        #     # print(position_data)
-        #     # adx_value = 27
-        #     if position_data:
-        #         # entry_price = float(position_data.get("entry_price", 0))
-        #         buy_side = position_data.get("position_side")
-        #         # print(buy_side)
-            
-        #         if 25 < adx_value <= 30:
-        #             if buy_side == 2:
-        #                 result = 1
-        #                 execute_sell_action(result, exchange, symbol, time, buy_date, close1, grid=kc_grid)
-        #                 has_traded_in_block = True 
-        #                 cache.set(smartstrategy_key, True, timeout=time)
-        #             elif buy_side == 1:
-        #                 result = 2
-        #                 execute_sell_action(result, exchange, symbol, time, buy_date, close1, grid=kc_grid)
-        #                 has_traded_in_block = True 
-        #                 cache.set(smartstrategy_key, True, timeout=time)
-            # result = 2
-            # execute_sell_action(result, symbol, buy_date, close1, grid=kc_grid)
-            # execute_buy_action(result, symbol, buy_date, close1, grid=kc_grid)
-        # print(f"{symbol}肯特:{current_timestamp},close2:{close2:.3f}, close1:{close1:.3f},下轨:{kc_lower:.3f},中轨:{Medium_track:.3f},上轨:{kc_upper:.3f},ADX:{adx_value:.3f}")
         return f"KC_smart_{exchange}_{symbol}完成 "
 
     except Exception as e:
@@ -348,7 +302,7 @@ def KC_smartstrategy(self, exchange, symbol, interval, data):
         return error_msg
 
 @shared_task(bind=True)
-def KC_samtrstrategy(self, exchange, symbol, interval, data):
+def KC_samtrstrategy(self, exchange, symbol, interval, data, label):
     global has_traded_in_block,account
     try:
         fast_data, time_params = process_kline_data(exchange, symbol, interval, data)
@@ -369,8 +323,7 @@ def KC_samtrstrategy(self, exchange, symbol, interval, data):
         kc_sa = 6
         
         exchange, adx_value = define_KC_samtrstrategy(exchange, symbol, time, fast_data, kc_sa)
-       
-
+    
         return f"KC_samtr_{exchange}_{symbol}完成 "
 
     except Exception as e:
@@ -380,7 +333,7 @@ def KC_samtrstrategy(self, exchange, symbol, interval, data):
         return error_msg
 
 @shared_task(bind=True)
-def EMA5strategy(self, exchange, symbol, interval, data):
+def Ferrystrategy(self, exchange, symbol, interval, data, label):
     global has_traded_in_block,account
     try:
         if interval not in ['5m', '1m']:
@@ -401,57 +354,14 @@ def EMA5strategy(self, exchange, symbol, interval, data):
             # print(f"数据已处理过: {cache_key}")
             return
         Ferryv = 5
-        side, mode = None, None
-        if interval == '1m' :
-            period=10
-        elif interval == '5m' :
-            period=5
-        ema5_values = calculate_ema(fast_data,period=period)
-        _, _ ,vi_ratios = calculate_vi_manual(fast_data,period=14)
-        # print(fast_data.tail(5))
-        # print(vi_ratios)
-        last_row = fast_data.iloc[-1]
-        vi_ratio1 = vi_ratios[-1]
-        # print(vi_ratio1)
-        last2_row = fast_data.iloc[-2]
-        vi_ratio2 = vi_ratios[-2]
-        print(f"{exchange}, {symbol}, {interval},{vi_ratio2}")
-        ema5_value1 = ema5_values.iloc[-1]
-        ema5_value2 = ema5_values.iloc[-2]
-        buy_date = last_row['timestamp']
-        close1 = last_row['close']
-        close2 = last2_row['close']
-        current_date = pd.Timestamp(buy_date)
-        dt = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S")
-        formatted_time = dt.strftime("%H:%M")
-        # print(ema5_value1,ema5_value2,close1,close2)
-        if 0.85 <= vi_ratio2 <= 1.15:
-            mode = 1 
-        else:
-            mode = 2 
 
-        if close2 > ema5_value2 and close1 > ema5_value1 :
-            side = 1
-        elif close2 < ema5_value2 and close1 < ema5_value1 :
-            side = 2
+        # side, mode = None, None
+        if timelevel == 1 :
+            period=200
+        elif timelevel == 5 :
+            period=200
 
-        if side is not None:
-            set_result = send_mode_signal(
-                    coinPlatform = exchange,
-                    marketType = "FUTURES",
-                    coin=symbol,
-                    plan=plan,
-                    time=time,
-                    side=side,
-                    mode=mode,
-                    dpo=1,
-                    dpo2=1,
-                    tp=1,
-                    sl=1,
-                    slPrice=1,
-                    multiple=1,
-                    multiple2=1
-                )
+        df_ferry_strategy(exchange, plan, symbol, time, fast_data, Ferryv, period)
         
             # execute_sell_action(result, symbol, buy_date, close1, pv=kc_grid)
             # execute_buy_action(result, symbol, buy_date, close1, pv=kc_grid)
@@ -465,133 +375,347 @@ def EMA5strategy(self, exchange, symbol, interval, data):
         return error_msg
 
 
-async def fetch_and_distribute_redis_data():
-    r = None
+@shared_task(bind=True)
+def MoneyToadtrategy(self, exchange, symbol, interval, data, label):
+    global has_traded_in_block
     try:
-        # 将同步操作放到线程池中执行
-        loop = asyncio.get_event_loop()
-        # 在线程池中执行同步的聚合器操作
-        aggregator = await loop.run_in_executor(
-            None, RealTimeETHDataAggregator
-        )
-        snapshot = await loop.run_in_executor(
-            None, aggregator.get_realtime_snapshot
-        )
-        print(f"当前价格: ${snapshot['price']['price']}")
+        # print(接收到"exchange, symbol, interval")
+        if symbol != 'eth':
+            return
+        if interval not in ['5m', '1m', '15m']:
+            return
+        fast_data, time_params = process_kline_data(exchange, symbol, interval, data)
+        time = time_params['seconds']      # 获取秒数 → 300
+        timelevel = time_params['minutes']      # 获取分钟数 → 5
+        # print(type(fast_data))
+        # print(len(fast_data))
+        # print(fast_data)
+        exchange = exchange.upper()
+        symbol = symbol.upper()
+        plan = "MoneyToad"
+        if fast_data.empty:
+            return
+        cache_key = f"MoneyToadline_{exchange}_{symbol}_{timelevel}_{fast_data['timestamp'].iloc[-1].replace(' ', '_').replace(':', '-')}"
+        if cache.get(cache_key):
+            # print(f"数据已处理过: {cache_key}")
+            return
+        MoneyToadv = 8
+
+        df_MoneyToad_strategy(exchange, plan, symbol, time, fast_data, MoneyToadv)
         
-        r = Redis(
-            host='47.84.194.2',
-            port=6379,
-            password='yyz135246',
-            db=0,
-            decode_responses=True,
-            socket_connect_timeout=5,
-            socket_timeout=5
-        )
-        await r.ping()
-        print("Redis连接成功！")
-        target_exchanges = {'bitget', 'binance', 'okx'}
-        target_symbols = {'btc', 'eth', 'sol', 'doge', 'xrp'}
-        target_intervals = {'1m', '5m', '15m', '1h'}
-        start_time = time.time()
-        total_tasks = 0
-        successful_tasks = 0
-        # 异步 SCAN
-        cursor = 0
-        pattern = "*_data_*_*"
-        keys = []
-        while True:
-            cursor, partial_keys = await r.scan(cursor=cursor, match=pattern, count=100)
-            keys.extend(partial_keys)
-            if cursor == 0:
-                break
-        print(f"找到 {len(keys)} 个符合格式的键")
+        return f"MoneyToad_{exchange}_{symbol}完成 "
+
+    except Exception as e:
+        # 返回简单的字符串而不是复杂的字典
+        error_msg = f"MoneyToadvtask_{exchange}_{symbol}报错: {str(e)}"
+        # print(error_msg)  # 记录错误日志
+        return error_msg
+    
+
+@shared_task(bind=True)
+def Martinstrategy(self, exchange, symbol, interval, data, label):
+    global has_traded_in_block
+    try:
+        if interval not in ['5m', '1m', '15m']:
+            return
+
+        fast_data, time_params = process_kline_data(exchange, symbol, interval, data)
+        time = time_params['seconds']
+        timelevel = time_params['minutes']
+        exchange = exchange.upper()
+        symbol = symbol.upper()
+        plan = "Martin"
+        if fast_data.empty:
+            return
+        cache_key = f"Martin_{exchange}_{symbol}_{timelevel}_{fast_data['timestamp'].iloc[-1].replace(' ', '_').replace(':', '-')}"
+        if cache.get(cache_key):
+            return
+        Martinv = 9
+
+        df_Martin_strategy(exchange, plan, symbol, time, fast_data, Martinv)
+        cache.set(cache_key, 1, timeout=max(time, 60))
+        return f"Martin_{exchange}_{symbol}完成 "
+
+    except Exception as e:
+        error_msg = f"Martintask_{exchange}_{symbol}报错: {str(e)}"
+        return error_msg
+
+# @shared_task(bind=True)
+# def CashCowstrategy(self, data):
+#     try:
+#         plan = "CashCow"
+#         # print(f"{plan}接收到数据: {data}")
+#         trading_s = data['15分钟价格预测']['交易策略']
+#         timestamp = data['时间戳']  # '2025-11-26T16:02:23.073708'
+
+#         # 转换为 datetime 对象
+#         dt = datetime.fromisoformat(timestamp)
+
+#         # 转换成 14:55 格式
+#         time_str = dt.strftime('%H:%M')
+#         time = 900
+#         symbol = "ETH"
+#         exchange = "BINANCE"
+    
+#         # print("=== 交易策略分析 ===")
+#         print(f"主要策略: {trading_s['主要策略']}")
+#         print(f"做单方向: {trading_s['做单方向']}")
+#         print(f"入场区域: {trading_s['入场区域']}")
+#         print(f"目标价位: {trading_s['目标价位']}")
+#         print(f"激进目标: {trading_s['激进目标']}")
+#         print(f"止损建议: {trading_s['止损建议']}")
+#         print(f"持仓时间: {trading_s['持仓时间']}")
+#         print(f"风险级别: {trading_s['风险级别']}")
+
+        
+
+#         if trading_s['主要策略'] == '趋势跟随':
+#             mode = 1
+#         elif trading_s['主要策略'] == '区间':
+#             mode = 2
+
+#         if trading_s['做单方向'] == '做多':
+#             side = "OPEN_LONG"
+#         elif trading_s['做单方向'] == '做空':
+#             side = "OPEN_SHORT"
+
+#         price = clean_price(trading_s['入场区域'])
+#         tpPrice = clean_price(trading_s['目标价位'])
+#         slPrice = clean_price(trading_s['止损建议'])
+
+#         # 风险级别判断
+#         if trading_s['风险级别'] == '较高':
+#             print("⚠️ 风险提示：高风险交易，请控制仓位")
+#         elif trading_s['风险级别'] == '中等':
+#             print("🚨 风险提示：极高风险，建议轻仓或观望")
+#         # elif trading_s['风险级别'] == '低':
+#             # 震荡区不做单
+#             # print("ℹ️ 风险提示：中等风险，正常仓位")
+
+#         if mode == 1 :
+#             base_key = f"{exchange}_{plan}_{symbol}_{time}"
+#             full_key = f"{base_key}_{plan}_{mode}_{side}_{price}_{tpPrice}_{slPrice}"
+#             current_params = f"{plan}_{mode}_{side}_{price}_{tpPrice}_{slPrice}"
+
+#             # 获取缓存中的历史记录（只存储最新的一条）
+#             last_params = cache.get(base_key)
+
+#             # print(fast_atr)
+#             # log_message = f"KCsamtr{exchange}_{symbol}_{time}_{signal_time},中轨2:{Medium_2},中轨1:{Medium_track},close2:{close2},close1:{close1},adx:{adx_last},atr:{current_atr}"
+#             # print(log_message)
+
+#             # CSV文件路径
+#             today = datetime.now().date()
+#             # csv_file = f"./kcsamtrsignal{today}_{time}.csv"
+
+#             if last_params is None:
+#                 # 首次发送信号，并存储参数组合
+#                 set_result = True
+#                 if set_result:
+#                     # 存储新记录
+#                     cache.set(base_key, current_params, timeout=30)
+#             else:
+#                 if last_params != current_params:
+#                     # print(f"震荡趋势有变化")
+#                     set_result = True
+#                     if set_result:
+#                         # 更新记录
+#                         cache.set(base_key, current_params, timeout=30)
+
+#         return f"CashCow_{exchange}_{symbol}完成 "
+#     except Exception as e:
+#         # 返回简单的字符串而不是复杂的字典
+#         error_msg = f"CashCowtask_{exchange}_{symbol}报错: {str(e)}"
+#         # print(error_msg)  # 记录错误日志
+#         return error_msg
+
+
+async def fetch_exchange_klines(session, exchange, symbol, interval):
+    """
+    直接从交易所拉取K线，返回 process_kline_data 可解析的原始格式。
+    - binance: list[list]（U本位合约）
+    - okx: {"data": list[list]}（USDT永续 SWAP）
+    """
+    exchange = exchange.lower()
+    symbol = symbol.lower()
+    interval = interval.lower()
+
+    try:
+        if exchange == 'binance':
+            params = {
+                'symbol': f'{symbol.upper()}USDT',
+                'interval': interval,
+                'limit': KLINE_LIMIT,
+            }
+            async with session.get(
+                BINANCE_FUTURES_KLINES_URL, params=params, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise ValueError(f'HTTP {resp.status}: {text[:200]}')
+                data = await resp.json()
+                if not isinstance(data, list) or not data:
+                    raise ValueError(f'空数据或格式异常: {type(data)}')
+                return data
+
+        if exchange == 'okx':
+            bar = OKX_INTERVAL_MAP.get(interval)
+            if not bar:
+                raise ValueError(f'不支持的OKX周期: {interval}')
+            inst_id = f'{symbol.upper()}-USDT-SWAP'
+            # OKX 单次最多 300，分页拉取直到凑满策略所需根数
+            collected = []
+            after_ts = None
+            pages = 0
+            max_pages = (KLINE_LIMIT + OKX_KLINE_LIMIT - 1) // OKX_KLINE_LIMIT + 1
+            while len(collected) < KLINE_LIMIT and pages < max_pages:
+                params = {
+                    'instId': inst_id,
+                    'bar': bar,
+                    'limit': str(OKX_KLINE_LIMIT),
+                }
+                # 首页用最新 candles；更早数据用 history-candles + after
+                if after_ts is None:
+                    url = OKX_CANDLES_URL
+                else:
+                    url = OKX_HISTORY_CANDLES_URL
+                    params['after'] = str(after_ts)
+
+                async with session.get(
+                    url, params=params, timeout=aiohttp.ClientTimeout(total=10)
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise ValueError(f'HTTP {resp.status}: {text[:200]}')
+                    payload = await resp.json()
+                    if str(payload.get('code', '')) != '0':
+                        raise ValueError(f"OKX错误: {payload.get('msg') or payload}")
+                    batch = payload.get('data') or []
+
+                pages += 1
+                if not batch:
+                    break
+                collected.extend(batch)
+                # OKX 按时间倒序返回，最后一条是本页最旧
+                after_ts = batch[-1][0]
+                if len(batch) < OKX_KLINE_LIMIT:
+                    break
+
+            if not collected:
+                raise ValueError('OKX返回空K线')
+
+            # 按时间戳去重，保持倒序（process_kline_data 会再升序排序）
+            dedup = {}
+            for row in collected:
+                dedup[str(row[0])] = row
+            candles = sorted(dedup.values(), key=lambda x: int(x[0]), reverse=True)
+            if len(candles) < 494:
+                print(f"警告: OKX {symbol}/{interval} 仅拿到 {len(candles)} 根，Ferry 可能仍不足")
+            return {'data': candles}
+
+        raise ValueError(f'不支持的交易所: {exchange}')
+    except Exception as e:
+        print(f"拉取K线失败 {exchange}/{symbol}/{interval}: {e}")
+        return None
+
+
+async def fetch_and_distribute_exchange_data():
+    """从币安/欧意拉取K线并分发给策略任务（替代原 Redis 取数）。"""
+    target_exchanges = ('binance', 'okx')
+    target_symbols = ('btc', 'eth')
+    # Ferry: 1m/5m；MoneyToad: 1m/5m/15m；保留 1h 供其他策略启用
+    target_intervals = ('1m', '5m', '15m', '1h')
+    label = None  # 合约行情
+
+    start_time = time.time()
+    total_tasks = 0
+    successful_tasks = 0
+    fetch_ok = 0
+    fetch_fail = 0
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            fetch_jobs = [
+                (exchange, symbol, interval, fetch_exchange_klines(session, exchange, symbol, interval))
+                for exchange in target_exchanges
+                for symbol in target_symbols
+                for interval in target_intervals
+            ]
+            results = await asyncio.gather(
+                *(job[3] for job in fetch_jobs),
+                return_exceptions=True,
+            )
+
         tasks_to_dispatch = []
-        for key in keys:
-            if key.endswith(('setMode', 'lastprice', 'spot')):
+        for (exchange, symbol, interval, _), result in zip(fetch_jobs, results):
+            if isinstance(result, Exception):
+                fetch_fail += 1
+                print(f"拉取异常 {exchange}/{symbol}/{interval}: {result}")
                 continue
-            parts = key.split('_')
-            if len(parts) != 4:
+            if result is None:
+                fetch_fail += 1
                 continue
-            exchange, _, symbol, interval = parts
-            exchange, symbol, interval = exchange.lower(), symbol.lower(), interval.lower()
-            if (exchange in target_exchanges and
-                symbol in target_symbols and
-                interval in target_intervals):
-                value = await r.get(key)
-                if not value:
-                    continue
-                try:
-                    data = json.loads(value)
-                    tasks_to_dispatch.append({
-                        'exchange': exchange,
-                        'symbol': symbol,
-                        'interval': interval,
-                        'data': data
-                    })
-                except json.JSONDecodeError:
-                    print(f"JSON解析失败: {key}")
-        # 批量分发
+            fetch_ok += 1
+            tasks_to_dispatch.append({
+                'exchange': exchange,
+                'symbol': symbol,
+                'interval': interval,
+                'data': result,
+                'label': label,
+            })
+
+        print(f"交易所拉取完成: 成功 {fetch_ok}, 失败 {fetch_fail}, 待分发 {len(tasks_to_dispatch)}")
+
         for task_info in tasks_to_dispatch:
-            total_tasks += 1
+            exchange = task_info['exchange']
+            symbol = task_info['symbol']
+            interval = task_info['interval']
+            args = (exchange, symbol, interval, task_info['data'], task_info['label'])
             try:
-                # FB_strategy.delay(
-                #     task_info['exchange'],
-                #     task_info['symbol'],
-                #     task_info['interval'],
-                #     task_info['data']
-                # )
-                # KC_strategy.delay(
-                #     task_info['exchange'],
-                #     task_info['symbol'],
-                #     task_info['interval'],
-                #     task_info['data']
-                # )
-                # KC_smartstrategy.delay(
-                #     task_info['exchange'],
-                #     task_info['symbol'],
-                #     task_info['interval'],
-                #     task_info['data']
-                # )
-                EMA5strategy.delay(
-                    task_info['exchange'],
-                    task_info['symbol'],
-                    task_info['interval'],
-                    task_info['data']
-                )
-                KC_samtrstrategy.delay(
-                    task_info['exchange'],
-                    task_info['symbol'],
-                    task_info['interval'],
-                    task_info['data']
-                )
+                # 只分发各策略支持的周期/币种，避免一堆 succeeded: None / unsupported_interval 日志
+                if interval in ('1m', '15m'):
+                    FB_strategy.delay(*args)
+                    total_tasks += 1
+                KC_strategy.delay(*args)
+                total_tasks += 1
+                KC_smartstrategy.delay(*args)
+                total_tasks += 1
+                if interval in ('1m', '5m'):
+                    Ferrystrategy.delay(*args)
+                    total_tasks += 1
+                if symbol.lower() == 'eth' and interval in ('1m', '5m', '15m'):
+                    MoneyToadtrategy.delay(*args)
+                    total_tasks += 1
+                if interval in ('1m', '5m', '15m'):
+                    Martinstrategy.delay(*args)
+                    total_tasks += 1
                 successful_tasks += 1
             except Exception as e:
-                print(f"分发任务失败: {task_info} - {e}")
+                print(f"分发任务失败: {exchange}/{symbol}/{interval} - {e}")
+
         duration = time.time() - start_time
         print(f"总任务: {total_tasks}, 成功: {successful_tasks}, 耗时: {duration:.2f}s")
         return {
             'total_tasks': total_tasks,
             'successful_tasks': successful_tasks,
+            'fetch_ok': fetch_ok,
+            'fetch_fail': fetch_fail,
             'duration': round(duration, 2),
-            'processed_keys': len(keys)
         }
     except Exception as e:
-        print(f"Redis错误: {e}")
+        print(f"交易所取数错误: {e}")
         return {
             'status': 'error',
             'error': str(e),
             'traceback': traceback.format_exc()
         }
-    # finally:
-    #     if r is not None:
-    #         await r.close()
 
 
-@shared_task(bind=True, time_limit=30, soft_time_limit=30)
+@shared_task(bind=True, time_limit=60, soft_time_limit=55)
 def fetch_klines_task(self):
     try:
-        result = asyncio.run(fetch_and_distribute_redis_data())
+        result = asyncio.run(fetch_and_distribute_exchange_data())
         return {"status": "success", "data": result}
     except Exception as e:
         return {
@@ -599,3 +723,13 @@ def fetch_klines_task(self):
             "error": str(e),
             "traceback": traceback.format_exc()
         }
+
+
+# Worker 就绪后立刻拉一次，之后由 Celery Beat 每 20 秒继续调度（无需浏览器手动触发）
+@worker_ready.connect
+def _autofetch_on_worker_ready(sender=None, **kwargs):
+    try:
+        async_result = fetch_klines_task.delay()
+        print(f"[auto] Celery Worker 已就绪，已自动触发 fetch_klines_task id={async_result.id}")
+    except Exception as e:
+        print(f"[auto] 自动触发 fetch_klines_task 失败: {e}")

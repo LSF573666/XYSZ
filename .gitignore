@@ -8,7 +8,7 @@ __pycache__/
 db.sqlite3
 
 staticfiles/
-biget/__pycache__/
+multistrategy/__pycache__/
 xysz/__pycache__/
 xysz/core/__pycache__/
 xysz/env/__pycache__/

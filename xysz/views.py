@@ -1,7 +1,7 @@
 # from django.http import JsonResponse
 # import pandas as pd
-# from xysz.core.wsbiget_1m import start_multiple_subscriptions
-# from xysz.main_biget import cof_main
+# from xysz.core.wsmultistrategy_1m import start_multiple_subscriptions
+# from xysz.main_multistrategy import cof_main
 # from xysz.tasks import FB_strategy, KC_strategy
 
 # def FB_view(request):

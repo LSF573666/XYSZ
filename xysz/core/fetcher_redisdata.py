@@ -3,7 +3,7 @@
 # from typing import Tuple, Dict
 
 # # 假设你有一个utils/redis_utils.py文件
-# from biget.celery import redis_client
+# from multistrategy.celery import redis_client
 
 # def fetch_redis_data() -> Tuple[Dict[str, pd.DataFrame], Dict[str, pd.DataFrame], Dict[str, float]]:
 #     """
